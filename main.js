@@ -682,6 +682,7 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
 
             button.type = "button";
             button.className = "csv-codeblock__sort-button";
+            label.className = "csv-codeblock__sort-label";
             label.textContent = rowData[i];
             indicator.className = "csv-codeblock__sort-indicator";
 

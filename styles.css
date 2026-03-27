@@ -21,10 +21,22 @@
   width: max-content;
 }
 
+.csv-codeblock--compact .csv-codeblock__scroll {
+  overflow-x: hidden;
+}
+
+.csv-codeblock--compact .csv-codeblock__table {
+  width: 100%;
+  table-layout: fixed;
+}
+
 .csv-codeblock--compact .csv-codeblock__table th,
 .csv-codeblock--compact .csv-codeblock__table td {
   padding: 0.2rem 0.45rem;
   line-height: 1.3;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .csv-codeblock--sticky .csv-codeblock__header-row th {
@@ -58,9 +70,23 @@
   cursor: pointer;
 }
 
+.csv-codeblock--compact .csv-codeblock__sort-button {
+  align-items: flex-start;
+}
+
+.csv-codeblock__sort-label {
+  min-width: 0;
+}
+
+.csv-codeblock--compact .csv-codeblock__sort-label {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .csv-codeblock__sort-indicator {
   min-width: 0.75rem;
   font-size: 0.75em;
+  flex: 0 0 auto;
 }
 
 .csv-codeblock--zebra .csv-codeblock__table tbody tr:nth-child(even) td {
