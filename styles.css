@@ -2,6 +2,13 @@
   max-width: 100%;
 }
 
+.csv-codeblock--error {
+  border: 1px solid var(--background-modifier-error);
+  border-radius: 6px;
+  padding: 0.75rem 0.9rem;
+  color: var(--text-error);
+}
+
 .csv-codeblock__scroll {
   max-width: 100%;
   overflow-x: auto;
@@ -24,4 +31,9 @@
 
 .csv-codeblock--zebra .csv-codeblock__table tbody tr:nth-child(even) td {
   background-color: var(--background-secondary-alt);
+}
+
+.csv-codeblock__error-title {
+  font-weight: 700;
+  margin-bottom: 0.25rem;
 }

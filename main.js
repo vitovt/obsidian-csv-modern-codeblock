@@ -29,6 +29,16 @@ __export(main_exports, {
 module.exports = __toCommonJS(main_exports);
 var import_obsidian = require("obsidian");
 
+class CsvParseError extends Error {
+  constructor(message, row, field, line) {
+    super(message);
+    this.name = "CsvParseError";
+    this.row = row;
+    this.field = field;
+    this.line = line;
+  }
+}
+
 class CsvParser {
   constructor(source, delimiter = ',') {
     this.source = source;
@@ -38,15 +48,27 @@ class CsvParser {
   forEachRow(onRow) {
     const source = this.source;
     const delimiter = this.delimiter;
+    const STATE_FIELD_START = 0;
+    const STATE_IN_UNQUOTED = 1;
+    const STATE_IN_QUOTED = 2;
+    const STATE_AFTER_QUOTE = 3;
     let currentRow = [];
     let currentFieldParts = [];
     let fieldStart = 0;
-    let inQuotes = false;
+    let state = STATE_FIELD_START;
+    let rowNumber = 1;
+    let fieldNumber = 1;
+    let lineNumber = 1;
+    let lastTokenWasDelimiter = false;
 
     const appendPendingFieldText = (end) => {
       if (fieldStart < end) {
         currentFieldParts.push(source.slice(fieldStart, end));
       }
+    };
+
+    const throwParseError = (message) => {
+      throw new CsvParseError(message, rowNumber, fieldNumber, lineNumber);
     };
 
     const pushField = () => {
@@ -58,47 +80,133 @@ class CsvParser {
         currentRow.push(currentFieldParts.join(''));
       }
       currentFieldParts = [];
+      fieldNumber++;
+      lastTokenWasDelimiter = false;
     };
 
     const pushRow = () => {
-      pushField();
+      if (state === STATE_FIELD_START && lastTokenWasDelimiter) {
+        pushField();
+      } else if (state === STATE_IN_UNQUOTED || state === STATE_AFTER_QUOTE) {
+        pushField();
+      } else if (state === STATE_FIELD_START && currentRow.length === 0) {
+        pushField();
+      }
       if (currentRow.length > 1 || currentRow[0] !== '') {
-        onRow(currentRow);
+        onRow(currentRow, rowNumber);
       }
       currentRow = [];
+      rowNumber++;
+      fieldNumber = 1;
+      state = STATE_FIELD_START;
+      lastTokenWasDelimiter = false;
     };
 
     for (let i = 0; i < source.length; i++) {
       const char = source[i];
       const nextChar = source[i + 1];
+      const isNewLine = char === "\n" || char === "\r";
 
-      if (char === '"') {
-        if (inQuotes && nextChar === '"') {
-          appendPendingFieldText(i);
-          currentFieldParts.push('"');
-          i++;
+      if (state === STATE_FIELD_START) {
+        if (char === delimiter) {
+          pushField();
+          fieldStart = i + 1;
+          lastTokenWasDelimiter = true;
+        } else if (isNewLine) {
+          pushRow();
+          if (char === "\r" && nextChar === "\n") {
+            i++;
+          }
+          fieldStart = i + 1;
+          lineNumber++;
+        } else if (char === '"') {
+          state = STATE_IN_QUOTED;
           fieldStart = i + 1;
         } else {
-          appendPendingFieldText(i);
-          inQuotes = !inQuotes;
-          fieldStart = i + 1;
+          state = STATE_IN_UNQUOTED;
+          fieldStart = i;
         }
-      } else if (char === delimiter && !inQuotes) {
-        appendPendingFieldText(i);
+        continue;
+      }
+
+      if (state === STATE_IN_UNQUOTED) {
+        if (char === delimiter) {
+          appendPendingFieldText(i);
+          pushField();
+          fieldStart = i + 1;
+          state = STATE_FIELD_START;
+          lastTokenWasDelimiter = true;
+        } else if (isNewLine) {
+          appendPendingFieldText(i);
+          pushRow();
+          if (char === "\r" && nextChar === "\n") {
+            i++;
+          }
+          fieldStart = i + 1;
+          lineNumber++;
+        } else if (char === '"') {
+          throwParseError("Unexpected quote inside an unquoted field");
+        }
+        continue;
+      }
+
+      if (state === STATE_IN_QUOTED) {
+        if (char === '"') {
+          appendPendingFieldText(i);
+          if (nextChar === '"') {
+            currentFieldParts.push('"');
+            i++;
+            fieldStart = i + 1;
+          } else {
+            state = STATE_AFTER_QUOTE;
+            fieldStart = i + 1;
+          }
+        } else if (char === "\r") {
+          if (nextChar === "\n") {
+            i++;
+          }
+          lineNumber++;
+        } else if (char === "\n") {
+          lineNumber++;
+        }
+        continue;
+      }
+
+      if (char === delimiter) {
         pushField();
         fieldStart = i + 1;
-      } else if ((char === '\n' || char === '\r') && !inQuotes) {
-        appendPendingFieldText(i);
-        if (char === '\r' && nextChar === '\n') {
+        state = STATE_FIELD_START;
+        lastTokenWasDelimiter = true;
+      } else if (isNewLine) {
+        pushRow();
+        if (char === "\r" && nextChar === "\n") {
           i++;
         }
-        pushRow();
         fieldStart = i + 1;
+        lineNumber++;
+      } else if (char === " " || char === "\t") {
+        fieldStart = i + 1;
+      } else {
+        throwParseError(`Unexpected character "${char}" after a closing quote`);
       }
     }
 
-    appendPendingFieldText(source.length);
-    if (currentFieldParts.length > 0 || currentRow.length > 0) {
+    if (state === STATE_IN_QUOTED) {
+      throwParseError("Unclosed quoted field");
+    }
+
+    if (state === STATE_IN_UNQUOTED) {
+      appendPendingFieldText(source.length);
+      pushField();
+      state = STATE_FIELD_START;
+    } else if (state === STATE_AFTER_QUOTE) {
+      pushField();
+      state = STATE_FIELD_START;
+    } else if (state === STATE_FIELD_START && lastTokenWasDelimiter) {
+      pushField();
+    }
+
+    if (currentRow.length > 0) {
       pushRow();
     }
   }
@@ -120,38 +228,55 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
   }
 
   renderTable(source, el, delimiter) {
-    const parser = new CsvParser(source, delimiter);
     const doc = el.ownerDocument;
     const wrapper = doc.createElement("div");
     const scrollContainer = doc.createElement("div");
     const table = doc.createElement("table");
     const head = doc.createElement("thead");
     const body = doc.createElement("tbody");
+    let expectedColumnCount = 0;
     let isHeaderRow = true;
 
     wrapper.className = "csv-codeblock csv-codeblock--zebra";
     scrollContainer.className = "csv-codeblock__scroll";
     table.className = "csv-codeblock__table";
 
-    parser.forEachRow((rowData) => {
-      const row = doc.createElement("tr");
-      const cellTag = isHeaderRow ? "th" : "td";
-      for (let i = 0; i < rowData.length; i++) {
-        const cell = doc.createElement(cellTag);
-        cell.textContent = rowData[i];
-        if (isHeaderRow) {
-          cell.scope = "col";
+    try {
+      const parser = new CsvParser(source, delimiter);
+
+      parser.forEachRow((rowData, rowNumber) => {
+        if (expectedColumnCount === 0) {
+          expectedColumnCount = rowData.length;
+        } else if (rowData.length !== expectedColumnCount) {
+          throw new CsvParseError(
+            `Row has ${rowData.length} fields, expected ${expectedColumnCount}`,
+            rowNumber,
+            rowData.length + 1,
+            rowNumber
+          );
         }
-        row.appendChild(cell);
-      }
-      if (isHeaderRow) {
-        row.className = "csv-codeblock__header-row";
-        head.appendChild(row);
-        isHeaderRow = false;
-      } else {
-        body.appendChild(row);
-      }
-    });
+        const row = doc.createElement("tr");
+        const cellTag = isHeaderRow ? "th" : "td";
+        for (let i = 0; i < rowData.length; i++) {
+          const cell = doc.createElement(cellTag);
+          cell.textContent = rowData[i];
+          if (isHeaderRow) {
+            cell.scope = "col";
+          }
+          row.appendChild(cell);
+        }
+        if (isHeaderRow) {
+          row.className = "csv-codeblock__header-row";
+          head.appendChild(row);
+          isHeaderRow = false;
+        } else {
+          body.appendChild(row);
+        }
+      });
+    } catch (error) {
+      this.renderError(el, doc, error);
+      return;
+    }
 
     if (head.childNodes.length > 0) {
       table.appendChild(head);
@@ -159,6 +284,29 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
     table.appendChild(body);
     wrapper.appendChild(scrollContainer);
     scrollContainer.appendChild(table);
+    el.appendChild(wrapper);
+  }
+
+  renderError(el, doc, error) {
+    const wrapper = doc.createElement("div");
+    const title = doc.createElement("div");
+    const details = doc.createElement("div");
+
+    wrapper.className = "csv-codeblock csv-codeblock--error";
+    title.className = "csv-codeblock__error-title";
+    details.className = "csv-codeblock__error-details";
+    title.textContent = "Malformed CSV";
+
+    if (error instanceof CsvParseError) {
+      details.textContent = `Row ${error.row}, field ${error.field} (line ${error.line}): ${error.message}.`;
+    } else if (error instanceof Error) {
+      details.textContent = error.message;
+    } else {
+      details.textContent = String(error);
+    }
+
+    wrapper.appendChild(title);
+    wrapper.appendChild(details);
     el.appendChild(wrapper);
   }
 }
