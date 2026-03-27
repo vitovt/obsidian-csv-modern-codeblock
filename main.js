@@ -462,7 +462,7 @@ function createFilterController(doc, head, headerRow, rows) {
           break;
         }
       }
-      row.element.style.display = isVisible ? "" : "none";
+      row.element.hidden = !isVisible;
     }
   };
 
@@ -474,7 +474,7 @@ function createFilterController(doc, head, headerRow, rows) {
 
   const setEnabled = (nextEnabled) => {
     enabled = nextEnabled;
-    filterRow.style.display = enabled ? "" : "none";
+    filterRow.hidden = !enabled;
     if (!enabled) {
       clearFilters();
     }
@@ -500,6 +500,14 @@ function resolveMaxHeight(maxHeight, highTableEnabled) {
   return `calc(${maxHeight} * 2)`;
 }
 
+function setCssVariable(element, name, value) {
+  if (element.style && typeof element.style.setProperty === "function") {
+    element.style.setProperty(name, value);
+  } else {
+    element.style[name] = value;
+  }
+}
+
 function setWrapperClasses(wrapper, state, stickyEnabled) {
   wrapper.className = [
     "csv-codeblock",
@@ -518,11 +526,7 @@ function updateStickyOffsets(wrapper, headerRow) {
     } else if (headerRow && typeof headerRow.offsetHeight === "number") {
       height = headerRow.offsetHeight;
     }
-    if (wrapper.style && typeof wrapper.style.setProperty === "function") {
-      wrapper.style.setProperty("--csv-codeblock-header-height", `${Math.ceil(height || 0)}px`);
-    } else {
-      wrapper.style["--csv-codeblock-header-height"] = `${Math.ceil(height || 0)}px`;
-    }
+    setCssVariable(wrapper, "--csv-codeblock-header-height", `${Math.ceil(height || 0)}px`);
   };
 
   if (typeof requestAnimationFrame === "function") {
@@ -789,11 +793,7 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
     let isHeaderRow = options.header;
     let headerRowElement = null;
     let applyState = () => {
-      if (wrapper.style && typeof wrapper.style.setProperty === "function") {
-        wrapper.style.setProperty("--csv-codeblock-max-height", resolveMaxHeight(options.maxHeight, state.highTable));
-      } else {
-        wrapper.style["--csv-codeblock-max-height"] = resolveMaxHeight(options.maxHeight, state.highTable);
-      }
+      setCssVariable(wrapper, "--csv-codeblock-max-height", resolveMaxHeight(options.maxHeight, state.highTable));
       toolbar.update(state);
     };
 
@@ -891,11 +891,7 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
       const sortController = createSortController(body, sortableHeaders, dataRows);
       applyState = () => {
         setWrapperClasses(wrapper, state, options.sticky);
-        if (wrapper.style && typeof wrapper.style.setProperty === "function") {
-          wrapper.style.setProperty("--csv-codeblock-max-height", resolveMaxHeight(options.maxHeight, state.highTable));
-        } else {
-          wrapper.style["--csv-codeblock-max-height"] = resolveMaxHeight(options.maxHeight, state.highTable);
-        }
+        setCssVariable(wrapper, "--csv-codeblock-max-height", resolveMaxHeight(options.maxHeight, state.highTable));
         sortController.setEnabled(state.sort && options.header);
         filterController.setEnabled(state.filter && options.header);
         toolbar.update(state);

@@ -1,10 +1,10 @@
 {
-	"id": "csv-codeblock",
-	"name": "CSV Codeblock",
-	"version": "1.1.0",
+	"id": "csv-modern-codeblock",
+	"name": "CSV Modern Codeblock",
+	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
-	"description": "This is a plugin for Obsidian. This plugin renders codeblocks with csv format.",
-	"author": "elrindir",
-	"authorUrl": "https://github.com/elrindir/",
+	"description": "Render CSV and TSV code blocks as interactive tables with sticky headers, per-column filters, sorting, layout toggles, link detection, and CSV validation.",
+	"author": "vitovt",
+	"authorUrl": "https://github.com/vitovt/",
 	"isDesktopOnly": false
 }
