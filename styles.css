@@ -12,3 +12,7 @@
   min-width: 100%;
   width: max-content;
 }
+
+.csv-codeblock__header-row th {
+  font-weight: 600;
+}

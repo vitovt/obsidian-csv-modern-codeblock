@@ -125,7 +125,9 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
     const wrapper = doc.createElement("div");
     const scrollContainer = doc.createElement("div");
     const table = doc.createElement("table");
+    const head = doc.createElement("thead");
     const body = doc.createElement("tbody");
+    let isHeaderRow = true;
 
     wrapper.className = "csv-codeblock";
     scrollContainer.className = "csv-codeblock__scroll";
@@ -133,14 +135,27 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
 
     parser.forEachRow((rowData) => {
       const row = doc.createElement("tr");
+      const cellTag = isHeaderRow ? "th" : "td";
       for (let i = 0; i < rowData.length; i++) {
-        const cell = doc.createElement("td");
+        const cell = doc.createElement(cellTag);
         cell.textContent = rowData[i];
+        if (isHeaderRow) {
+          cell.scope = "col";
+        }
         row.appendChild(cell);
       }
-      body.appendChild(row);
+      if (isHeaderRow) {
+        row.className = "csv-codeblock__header-row";
+        head.appendChild(row);
+        isHeaderRow = false;
+      } else {
+        body.appendChild(row);
+      }
     });
 
+    if (head.childNodes.length > 0) {
+      table.appendChild(head);
+    }
     table.appendChild(body);
     wrapper.appendChild(scrollContainer);
     scrollContainer.appendChild(table);
