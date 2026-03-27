@@ -537,8 +537,11 @@ function updateStickyOffsets(wrapper, headerRow) {
 }
 
 function setToolbarButtonState(button, pressed) {
+  const label = button.dataset.label || button.textContent || "";
   button.className = pressed ? "csv-codeblock__toolbar-button csv-codeblock__toolbar-button--pressed" : "csv-codeblock__toolbar-button";
+  button.textContent = `${pressed ? "✔️" : "〰️"} ${label}`;
   button.setAttribute("aria-pressed", pressed ? "true" : "false");
+  button.setAttribute("aria-label", `${label}: ${pressed ? "enabled" : "disabled"}`);
 }
 
 function createToolbar(doc, features, onToggle) {
@@ -558,12 +561,12 @@ function createToolbar(doc, features, onToggle) {
     const button = doc.createElement("button");
 
     button.type = "button";
-    button.textContent = control.label;
+    button.dataset.label = control.label;
     button.disabled = !control.available;
-    button.className = "csv-codeblock__toolbar-button";
-    button.setAttribute("aria-pressed", "false");
+    setToolbarButtonState(button, false);
     if (button.disabled) {
       button.className += " csv-codeblock__toolbar-button--disabled";
+      button.setAttribute("aria-disabled", "true");
     } else {
       button.addEventListener("click", () => {
         onToggle(control.key);
