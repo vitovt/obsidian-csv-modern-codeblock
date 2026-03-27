@@ -383,6 +383,64 @@ function enableSorting(body, headers, rows) {
   updateSortIndicators(headers, activeColumnIndex, direction);
 }
 
+function enableFiltering(doc, wrapper, rows) {
+  if (rows.length === 0) {
+    return;
+  }
+
+  const filterRow = doc.createElement("div");
+  const filterLabel = doc.createElement("label");
+  const filterInput = doc.createElement("input");
+  const resultCount = doc.createElement("div");
+  const requestFrame = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (callback) => {
+    callback();
+    return 0;
+  };
+  const cancelFrame = typeof cancelAnimationFrame === "function" ? cancelAnimationFrame : () => {
+  };
+  let frameHandle = 0;
+
+  filterRow.className = "csv-codeblock__filter-row";
+  filterLabel.className = "csv-codeblock__filter-label";
+  filterInput.className = "csv-codeblock__filter-input";
+  resultCount.className = "csv-codeblock__filter-count";
+
+  filterLabel.textContent = "Filter";
+  filterInput.type = "search";
+  filterInput.placeholder = "Filter rows";
+
+  const applyFilter = () => {
+    const query = filterInput.value.trim().toLowerCase();
+    let visibleRows = 0;
+
+    for (const row of rows) {
+      const isVisible = query.length === 0 || row.searchText.includes(query);
+      row.element.style.display = isVisible ? "" : "none";
+      if (isVisible) {
+        visibleRows++;
+      }
+    }
+
+    resultCount.textContent = `${visibleRows}/${rows.length}`;
+  };
+
+  filterInput.addEventListener("input", () => {
+    if (frameHandle) {
+      cancelFrame(frameHandle);
+    }
+    frameHandle = requestFrame(() => {
+      frameHandle = 0;
+      applyFilter();
+    });
+  });
+
+  filterRow.appendChild(filterLabel);
+  filterRow.appendChild(filterInput);
+  filterRow.appendChild(resultCount);
+  wrapper.appendChild(filterRow);
+  applyFilter();
+}
+
 
 class CsvCodeBlockPlugin extends import_obsidian.Plugin {
   async onload() {
@@ -466,6 +524,7 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
           dataRows.push({
             element: row,
             values: rowData,
+            searchText: rowData.join(" ").toLowerCase(),
             originalIndex: dataRows.length
           });
           body.appendChild(row);
@@ -481,6 +540,7 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
     }
     table.appendChild(body);
     enableSorting(body, sortableHeaders, dataRows);
+    enableFiltering(doc, wrapper, dataRows);
     wrapper.appendChild(scrollContainer);
     scrollContainer.appendChild(table);
     el.appendChild(wrapper);
