@@ -213,12 +213,76 @@ class CsvParser {
 
 }
 
+function detectCsvDelimiter(source) {
+  const candidates = [",", ";"];
+  const scores = new Map(candidates.map((delimiter) => [delimiter, 0]));
+  const matches = new Map(candidates.map((delimiter) => [delimiter, 0]));
+  let inQuotes = false;
+  let rowCounts = new Map(candidates.map((delimiter) => [delimiter, 0]));
+  let sampledRows = 0;
+  let sawRowData = false;
+
+  const commitRow = () => {
+    if (!sawRowData) {
+      rowCounts = new Map(candidates.map((delimiter) => [delimiter, 0]));
+      return;
+    }
+    sampledRows++;
+    for (const delimiter of candidates) {
+      const count = rowCounts.get(delimiter);
+      if (count > 0) {
+        scores.set(delimiter, scores.get(delimiter) + count);
+        matches.set(delimiter, matches.get(delimiter) + 1);
+      }
+    }
+    rowCounts = new Map(candidates.map((delimiter) => [delimiter, 0]));
+    sawRowData = false;
+  };
+
+  for (let i = 0; i < source.length && sampledRows < 10; i++) {
+    const char = source[i];
+    const nextChar = source[i + 1];
+
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      sawRowData = true;
+      continue;
+    }
+
+    if (!inQuotes && (char === "\n" || char === "\r")) {
+      if (char === "\r" && nextChar === "\n") {
+        i++;
+      }
+      commitRow();
+      continue;
+    }
+
+    if (!inQuotes && scores.has(char)) {
+      rowCounts.set(char, rowCounts.get(char) + 1);
+      sawRowData = true;
+    } else if (char.trim().length > 0) {
+      sawRowData = true;
+    }
+  }
+
+  commitRow();
+
+  if (scores.get(";") > scores.get(",") && matches.get(";") >= matches.get(",")) {
+    return ";";
+  }
+  return ",";
+}
+
 
 class CsvCodeBlockPlugin extends import_obsidian.Plugin {
   async onload() {
     // Register CSV code block processor
     this.registerMarkdownCodeBlockProcessor("csv", (source, el, ctx) => {
-      this.renderTable(source, el, ",");
+      this.renderTable(source, el, "auto");
     });
 
     // Register TSV code block processor
@@ -228,6 +292,7 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
   }
 
   renderTable(source, el, delimiter) {
+    const resolvedDelimiter = delimiter === "auto" ? detectCsvDelimiter(source) : delimiter;
     const doc = el.ownerDocument;
     const wrapper = doc.createElement("div");
     const scrollContainer = doc.createElement("div");
@@ -242,7 +307,7 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
     table.className = "csv-codeblock__table";
 
     try {
-      const parser = new CsvParser(source, delimiter);
+      const parser = new CsvParser(source, resolvedDelimiter);
 
       parser.forEachRow((rowData, rowNumber) => {
         if (expectedColumnCount === 0) {
