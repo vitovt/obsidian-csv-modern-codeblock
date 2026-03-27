@@ -103,11 +103,6 @@ class CsvParser {
     }
   }
 
-  parse() {
-    const rows = [];
-    this.forEachRow((row) => rows.push(row));
-    return rows;
-  }
 }
 
 
