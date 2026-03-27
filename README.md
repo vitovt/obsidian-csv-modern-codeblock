@@ -2,6 +2,11 @@
 
 CSV Modern Codeblock renders `csv` and `tsv` fenced code blocks as interactive tables inside Obsidian.
 
+
+https://github.com/user-attachments/assets/cc8ba527-c131-4b5d-8d14-76721c56240d
+
+
+
 This plugin was rewritten from scratch for modern table UX, stricter CSV handling, and better behavior with data-heavy notes. It was inspired by the original CSV Codeblock idea, but it is not a fork.
 
 Repository:
