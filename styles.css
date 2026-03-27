@@ -39,6 +39,10 @@
   background-color: var(--background-secondary-alt);
 }
 
+.csv-codeblock__link {
+  word-break: break-word;
+}
+
 .csv-codeblock__error-title {
   font-weight: 700;
   margin-bottom: 0.25rem;

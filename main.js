@@ -277,6 +277,29 @@ function detectCsvDelimiter(source) {
   return ",";
 }
 
+function createCellContent(doc, cell, text) {
+  const trimmed = text.trim();
+  if (trimmed.length > 0) {
+    try {
+      const url = new URL(trimmed);
+      if (url.protocol === "http:" || url.protocol === "https:" || url.protocol === "mailto:") {
+        const link = doc.createElement("a");
+        link.className = "csv-codeblock__link";
+        link.href = trimmed;
+        link.textContent = text;
+        if (url.protocol !== "mailto:") {
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+        }
+        cell.appendChild(link);
+        return;
+      }
+    } catch (error) {
+    }
+  }
+  cell.textContent = text;
+}
+
 
 class CsvCodeBlockPlugin extends import_obsidian.Plugin {
   async onload() {
@@ -324,7 +347,7 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
         const cellTag = isHeaderRow ? "th" : "td";
         for (let i = 0; i < rowData.length; i++) {
           const cell = doc.createElement(cellTag);
-          cell.textContent = rowData[i];
+          createCellContent(doc, cell, rowData[i]);
           if (isHeaderRow) {
             cell.scope = "col";
           }
