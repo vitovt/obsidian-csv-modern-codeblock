@@ -35,6 +35,29 @@
   font-weight: 600;
 }
 
+.csv-codeblock__header-cell {
+  white-space: nowrap;
+}
+
+.csv-codeblock__sort-button {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.csv-codeblock__sort-indicator {
+  min-width: 0.75rem;
+  font-size: 0.75em;
+}
+
 .csv-codeblock--zebra .csv-codeblock__table tbody tr:nth-child(even) td {
   background-color: var(--background-secondary-alt);
 }

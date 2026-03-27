@@ -300,6 +300,89 @@ function createCellContent(doc, cell, text) {
   cell.textContent = text;
 }
 
+function compareCellValues(leftValue, rightValue) {
+  const leftText = leftValue.trim();
+  const rightText = rightValue.trim();
+
+  if (leftText.length === 0 && rightText.length === 0) {
+    return 0;
+  }
+  if (leftText.length === 0) {
+    return 1;
+  }
+  if (rightText.length === 0) {
+    return -1;
+  }
+
+  const leftNumber = Number(leftText);
+  const rightNumber = Number(rightText);
+  const leftIsNumber = Number.isFinite(leftNumber);
+  const rightIsNumber = Number.isFinite(rightNumber);
+
+  if (leftIsNumber && rightIsNumber) {
+    return leftNumber - rightNumber;
+  }
+
+  return leftText.localeCompare(rightText, void 0, {
+    numeric: true,
+    sensitivity: "base"
+  });
+}
+
+function updateSortIndicators(headers, activeColumnIndex, direction) {
+  for (let i = 0; i < headers.length; i++) {
+    const header = headers[i];
+    const isActive = i === activeColumnIndex;
+    header.cell.setAttribute("aria-sort", isActive ? direction === 1 ? "ascending" : "descending" : "none");
+    header.indicator.textContent = isActive ? direction === 1 ? "▲" : "▼" : "";
+  }
+}
+
+function enableSorting(body, headers, rows) {
+  if (headers.length === 0 || rows.length === 0) {
+    return;
+  }
+
+  let activeColumnIndex = -1;
+  let direction = 1;
+
+  const applySort = () => {
+    if (activeColumnIndex < 0) {
+      return;
+    }
+    const sortedRows = rows.slice().sort((left, right) => {
+      const result = compareCellValues(
+        left.values[activeColumnIndex] || "",
+        right.values[activeColumnIndex] || ""
+      );
+      if (result !== 0) {
+        return result * direction;
+      }
+      return left.originalIndex - right.originalIndex;
+    });
+
+    for (const row of sortedRows) {
+      body.appendChild(row.element);
+    }
+  };
+
+  for (let i = 0; i < headers.length; i++) {
+    const header = headers[i];
+    header.button.addEventListener("click", () => {
+      if (activeColumnIndex === i) {
+        direction = direction === 1 ? -1 : 1;
+      } else {
+        activeColumnIndex = i;
+        direction = 1;
+      }
+      applySort();
+      updateSortIndicators(headers, activeColumnIndex, direction);
+    });
+  }
+
+  updateSortIndicators(headers, activeColumnIndex, direction);
+}
+
 
 class CsvCodeBlockPlugin extends import_obsidian.Plugin {
   async onload() {
@@ -322,6 +405,8 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
     const table = doc.createElement("table");
     const head = doc.createElement("thead");
     const body = doc.createElement("tbody");
+    const sortableHeaders = [];
+    const dataRows = [];
     let expectedColumnCount = 0;
     let isHeaderRow = true;
 
@@ -347,9 +432,29 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
         const cellTag = isHeaderRow ? "th" : "td";
         for (let i = 0; i < rowData.length; i++) {
           const cell = doc.createElement(cellTag);
-          createCellContent(doc, cell, rowData[i]);
           if (isHeaderRow) {
             cell.scope = "col";
+            cell.className = "csv-codeblock__header-cell";
+            const button = doc.createElement("button");
+            const label = doc.createElement("span");
+            const indicator = doc.createElement("span");
+
+            button.type = "button";
+            button.className = "csv-codeblock__sort-button";
+            label.textContent = rowData[i];
+            indicator.className = "csv-codeblock__sort-indicator";
+
+            button.appendChild(label);
+            button.appendChild(indicator);
+            cell.appendChild(button);
+
+            sortableHeaders.push({
+              button,
+              cell,
+              indicator
+            });
+          } else {
+            createCellContent(doc, cell, rowData[i]);
           }
           row.appendChild(cell);
         }
@@ -358,6 +463,11 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
           head.appendChild(row);
           isHeaderRow = false;
         } else {
+          dataRows.push({
+            element: row,
+            values: rowData,
+            originalIndex: dataRows.length
+          });
           body.appendChild(row);
         }
       });
@@ -370,6 +480,7 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
       table.appendChild(head);
     }
     table.appendChild(body);
+    enableSorting(body, sortableHeaders, dataRows);
     wrapper.appendChild(scrollContainer);
     scrollContainer.appendChild(table);
     el.appendChild(wrapper);
