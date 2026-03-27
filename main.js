@@ -35,52 +35,77 @@ class CsvParser {
     this.delimiter = delimiter;
   }
 
-  parse() {
-    const rows = [];
+  forEachRow(onRow) {
+    const source = this.source;
+    const delimiter = this.delimiter;
     let currentRow = [];
-    let currentField = '';
+    let currentFieldParts = [];
+    let fieldStart = 0;
     let inQuotes = false;
 
+    const appendPendingFieldText = (end) => {
+      if (fieldStart < end) {
+        currentFieldParts.push(source.slice(fieldStart, end));
+      }
+    };
+
     const pushField = () => {
-      currentRow.push(currentField);
-      currentField = '';
+      if (currentFieldParts.length === 0) {
+        currentRow.push('');
+      } else if (currentFieldParts.length === 1) {
+        currentRow.push(currentFieldParts[0]);
+      } else {
+        currentRow.push(currentFieldParts.join(''));
+      }
+      currentFieldParts = [];
     };
 
     const pushRow = () => {
       pushField();
       if (currentRow.length > 1 || currentRow[0] !== '') {
-        rows.push(currentRow);
+        onRow(currentRow);
       }
       currentRow = [];
     };
 
-    for (let i = 0; i < this.source.length; i++) {
-      const char = this.source[i];
-      const nextChar = this.source[i + 1];
+    for (let i = 0; i < source.length; i++) {
+      const char = source[i];
+      const nextChar = source[i + 1];
 
       if (char === '"') {
         if (inQuotes && nextChar === '"') {
-          currentField += '"';
+          appendPendingFieldText(i);
+          currentFieldParts.push('"');
           i++;
+          fieldStart = i + 1;
         } else {
+          appendPendingFieldText(i);
           inQuotes = !inQuotes;
+          fieldStart = i + 1;
         }
-      } else if (char === this.delimiter && !inQuotes) {
+      } else if (char === delimiter && !inQuotes) {
+        appendPendingFieldText(i);
         pushField();
+        fieldStart = i + 1;
       } else if ((char === '\n' || char === '\r') && !inQuotes) {
+        appendPendingFieldText(i);
         if (char === '\r' && nextChar === '\n') {
           i++;
         }
         pushRow();
-      } else {
-        currentField += char;
+        fieldStart = i + 1;
       }
     }
 
-    if (currentField.length > 0 || currentRow.length > 0) {
+    appendPendingFieldText(source.length);
+    if (currentFieldParts.length > 0 || currentRow.length > 0) {
       pushRow();
     }
+  }
 
+  parse() {
+    const rows = [];
+    this.forEachRow((row) => rows.push(row));
     return rows;
   }
 }
@@ -101,16 +126,21 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
 
   renderTable(source, el, delimiter) {
     const parser = new CsvParser(source, delimiter);
-    const data = parser.parse();
+    const doc = el.ownerDocument;
+    const table = doc.createElement("table");
+    const body = doc.createElement("tbody");
 
-    const table = el.createEl("table");
-    const body = table.createEl("tbody");
-
-    data.forEach(rowData => {
-      const row = body.createEl("tr");
-      rowData.forEach(field => {
-        row.createEl("td", { text: field });
-      });
+    parser.forEachRow((rowData) => {
+      const row = doc.createElement("tr");
+      for (let i = 0; i < rowData.length; i++) {
+        const cell = doc.createElement("td");
+        cell.textContent = rowData[i];
+        row.appendChild(cell);
+      }
+      body.appendChild(row);
     });
+
+    table.appendChild(body);
+    el.appendChild(table);
   }
 }
