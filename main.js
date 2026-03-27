@@ -129,7 +129,7 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
     const body = doc.createElement("tbody");
     let isHeaderRow = true;
 
-    wrapper.className = "csv-codeblock";
+    wrapper.className = "csv-codeblock csv-codeblock--zebra";
     scrollContainer.className = "csv-codeblock__scroll";
     table.className = "csv-codeblock__table";
 
