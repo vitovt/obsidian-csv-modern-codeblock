@@ -122,8 +122,12 @@
   flex: 0 0 auto;
 }
 
-.csv-codeblock--zebra .csv-codeblock__table tbody tr:nth-child(even) td {
-  background-color: var(--background-secondary-alt);
+.csv-codeblock--zebra .csv-codeblock__table tbody tr:nth-child(odd) > td {
+  background-color: var(--background-primary-alt, var(--background-primary)) !important;
+}
+
+.csv-codeblock--zebra .csv-codeblock__table tbody tr:nth-child(even) > td {
+  background-color: var(--background-secondary-alt, var(--background-secondary)) !important;
 }
 
 .csv-codeblock__header-filter-row th {
