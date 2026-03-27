@@ -329,25 +329,31 @@ function compareCellValues(leftValue, rightValue) {
   });
 }
 
-function updateSortIndicators(headers, activeColumnIndex, direction) {
+function updateSortIndicators(headers, activeColumnIndex, direction, enabled) {
   for (let i = 0; i < headers.length; i++) {
     const header = headers[i];
-    const isActive = i === activeColumnIndex;
+    const isActive = enabled && i === activeColumnIndex;
     header.cell.setAttribute("aria-sort", isActive ? direction === 1 ? "ascending" : "descending" : "none");
     header.indicator.textContent = isActive ? direction === 1 ? "▲" : "▼" : "";
+    header.button.className = enabled ? "csv-codeblock__sort-button" : "csv-codeblock__sort-button csv-codeblock__sort-button--disabled";
+    header.button.setAttribute("aria-disabled", enabled ? "false" : "true");
   }
 }
 
-function enableSorting(body, headers, rows) {
-  if (headers.length === 0 || rows.length === 0) {
-    return;
-  }
-
+function createSortController(body, headers, rows) {
   let activeColumnIndex = -1;
   let direction = 1;
+  let enabled = false;
+
+  const resetOrder = () => {
+    const sortedRows = rows.slice().sort((left, right) => left.originalIndex - right.originalIndex);
+    for (const row of sortedRows) {
+      body.appendChild(row.element);
+    }
+  };
 
   const applySort = () => {
-    if (activeColumnIndex < 0) {
+    if (!enabled || activeColumnIndex < 0) {
       return;
     }
     const sortedRows = rows.slice().sort((left, right) => {
@@ -369,6 +375,9 @@ function enableSorting(body, headers, rows) {
   for (let i = 0; i < headers.length; i++) {
     const header = headers[i];
     header.button.addEventListener("click", () => {
+      if (!enabled) {
+        return;
+      }
       if (activeColumnIndex === i) {
         direction = direction === 1 ? -1 : 1;
       } else {
@@ -376,22 +385,36 @@ function enableSorting(body, headers, rows) {
         direction = 1;
       }
       applySort();
-      updateSortIndicators(headers, activeColumnIndex, direction);
+      updateSortIndicators(headers, activeColumnIndex, direction, enabled);
     });
   }
 
-  updateSortIndicators(headers, activeColumnIndex, direction);
+  const setEnabled = (nextEnabled) => {
+    enabled = nextEnabled && headers.length > 0 && rows.length > 0;
+    if (!enabled) {
+      activeColumnIndex = -1;
+      direction = 1;
+      resetOrder();
+    }
+    updateSortIndicators(headers, activeColumnIndex, direction, enabled);
+  };
+
+  setEnabled(false);
+  return {
+    setEnabled
+  };
 }
 
-function enableFiltering(doc, wrapper, rows) {
-  if (rows.length === 0) {
-    return;
+function createFilterController(doc, head, headerRow, rows) {
+  if (!headerRow || rows.length === 0) {
+    return {
+      setEnabled() {
+      }
+    };
   }
 
-  const filterRow = doc.createElement("div");
-  const filterLabel = doc.createElement("label");
-  const filterInput = doc.createElement("input");
-  const resultCount = doc.createElement("div");
+  const filterRow = doc.createElement("tr");
+  const inputs = [];
   const requestFrame = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (callback) => {
     callback();
     return 0;
@@ -399,56 +422,176 @@ function enableFiltering(doc, wrapper, rows) {
   const cancelFrame = typeof cancelAnimationFrame === "function" ? cancelAnimationFrame : () => {
   };
   let frameHandle = 0;
+  let enabled = false;
 
-  filterRow.className = "csv-codeblock__filter-row";
-  filterLabel.className = "csv-codeblock__filter-label";
-  filterInput.className = "csv-codeblock__filter-input";
-  resultCount.className = "csv-codeblock__filter-count";
+  filterRow.className = "csv-codeblock__header-filter-row";
 
-  filterLabel.textContent = "Filter";
-  filterInput.type = "search";
-  filterInput.placeholder = "Filter rows";
+  for (let i = 0; i < headerRow.childNodes.length; i++) {
+    const cell = doc.createElement("th");
+    const input = doc.createElement("input");
+
+    cell.className = "csv-codeblock__header-filter-cell";
+    input.type = "search";
+    input.className = "csv-codeblock__header-filter-input";
+    input.placeholder = "Filter";
+
+    input.addEventListener("input", () => {
+      if (frameHandle) {
+        cancelFrame(frameHandle);
+      }
+      frameHandle = requestFrame(() => {
+        frameHandle = 0;
+        applyFilter();
+      });
+    });
+
+    cell.appendChild(input);
+    filterRow.appendChild(cell);
+    inputs.push(input);
+  }
+
+  head.appendChild(filterRow);
 
   const applyFilter = () => {
-    const query = filterInput.value.trim().toLowerCase();
-    let visibleRows = 0;
-
     for (const row of rows) {
-      const isVisible = query.length === 0 || row.searchText.includes(query);
-      row.element.style.display = isVisible ? "" : "none";
-      if (isVisible) {
-        visibleRows++;
+      let isVisible = true;
+      for (let i = 0; i < inputs.length; i++) {
+        const query = inputs[i].value.trim().toLowerCase();
+        if (query.length > 0 && !(row.searchValues[i] || "").includes(query)) {
+          isVisible = false;
+          break;
+        }
       }
+      row.element.style.display = isVisible ? "" : "none";
     }
-
-    resultCount.textContent = `${visibleRows}/${rows.length}`;
   };
 
-  filterInput.addEventListener("input", () => {
-    if (frameHandle) {
-      cancelFrame(frameHandle);
+  const clearFilters = () => {
+    for (const input of inputs) {
+      input.value = "";
     }
-    frameHandle = requestFrame(() => {
-      frameHandle = 0;
-      applyFilter();
-    });
-  });
+  };
 
-  filterRow.appendChild(filterLabel);
-  filterRow.appendChild(filterInput);
-  filterRow.appendChild(resultCount);
-  wrapper.appendChild(filterRow);
-  applyFilter();
+  const setEnabled = (nextEnabled) => {
+    enabled = nextEnabled;
+    filterRow.style.display = enabled ? "" : "none";
+    if (!enabled) {
+      clearFilters();
+    }
+    applyFilter();
+  };
+
+  setEnabled(false);
+  return {
+    setEnabled
+  };
+}
+
+function resolveMaxHeight(maxHeight, highTableEnabled) {
+  if (!highTableEnabled) {
+    return maxHeight;
+  }
+
+  const normalized = maxHeight.trim().toLowerCase();
+  if (normalized === "none" || normalized === "auto" || normalized === "unset" || normalized === "inherit") {
+    return maxHeight;
+  }
+
+  return `calc(${maxHeight} * 2)`;
+}
+
+function setWrapperClasses(wrapper, state, stickyEnabled) {
+  wrapper.className = [
+    "csv-codeblock",
+    state.compact ? "csv-codeblock--compact" : "",
+    state.zebra ? "csv-codeblock--zebra" : "",
+    state.highTable ? "csv-codeblock--high-table" : "",
+    stickyEnabled ? "csv-codeblock--sticky" : ""
+  ].filter((className) => className.length > 0).join(" ");
+}
+
+function updateStickyOffsets(wrapper, headerRow) {
+  const setOffset = () => {
+    let height = 0;
+    if (headerRow && typeof headerRow.getBoundingClientRect === "function") {
+      height = headerRow.getBoundingClientRect().height;
+    } else if (headerRow && typeof headerRow.offsetHeight === "number") {
+      height = headerRow.offsetHeight;
+    }
+    if (wrapper.style && typeof wrapper.style.setProperty === "function") {
+      wrapper.style.setProperty("--csv-codeblock-header-height", `${Math.ceil(height || 0)}px`);
+    } else {
+      wrapper.style["--csv-codeblock-header-height"] = `${Math.ceil(height || 0)}px`;
+    }
+  };
+
+  if (typeof requestAnimationFrame === "function") {
+    requestAnimationFrame(setOffset);
+  } else {
+    setOffset();
+  }
+}
+
+function setToolbarButtonState(button, pressed) {
+  button.className = pressed ? "csv-codeblock__toolbar-button csv-codeblock__toolbar-button--pressed" : "csv-codeblock__toolbar-button";
+  button.setAttribute("aria-pressed", pressed ? "true" : "false");
+}
+
+function createToolbar(doc, features, onToggle) {
+  const toolbar = doc.createElement("div");
+  const buttons = {};
+  const controls = [
+    { key: "sort", label: "Sorting", available: features.sort },
+    { key: "filter", label: "Filtering", available: features.filter },
+    { key: "compact", label: "Compact", available: true },
+    { key: "zebra", label: "Zebra", available: true },
+    { key: "highTable", label: "High table", available: true }
+  ];
+
+  toolbar.className = "csv-codeblock__toolbar";
+
+  for (const control of controls) {
+    const button = doc.createElement("button");
+
+    button.type = "button";
+    button.textContent = control.label;
+    button.disabled = !control.available;
+    button.className = "csv-codeblock__toolbar-button";
+    button.setAttribute("aria-pressed", "false");
+    if (button.disabled) {
+      button.className += " csv-codeblock__toolbar-button--disabled";
+    } else {
+      button.addEventListener("click", () => {
+        onToggle(control.key);
+      });
+    }
+
+    toolbar.appendChild(button);
+    buttons[control.key] = button;
+  }
+
+  return {
+    element: toolbar,
+    update(state) {
+      for (const control of controls) {
+        if (!buttons[control.key] || !control.available) {
+          continue;
+        }
+        setToolbarButtonState(buttons[control.key], state[control.key]);
+      }
+    }
+  };
 }
 
 const DEFAULT_RENDER_OPTIONS = {
   title: "",
   header: true,
   sticky: true,
-  zebra: true,
-  compact: true,
-  sort: true,
-  filter: true,
+  zebra: false,
+  compact: false,
+  sort: false,
+  filter: false,
+  highTable: false,
   links: true,
   maxHeight: "24rem",
   delimiter: "auto"
@@ -457,6 +600,9 @@ const DEFAULT_RENDER_OPTIONS = {
 function normalizeOptionKey(key) {
   if (key === "max-height") {
     return "maxHeight";
+  }
+  if (key === "high-table") {
+    return "highTable";
   }
   return key;
 }
@@ -557,6 +703,7 @@ function parseFenceOptions(optionText, defaultDelimiter) {
       key === "compact" ||
       key === "sort" ||
       key === "filter" ||
+      key === "highTable" ||
       key === "links"
     ) {
       options[key] = parseBooleanOption(rawKey, rawValue);
@@ -631,20 +778,26 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
     const body = doc.createElement("tbody");
     const sortableHeaders = [];
     const dataRows = [];
+    const state = {
+      sort: options.sort,
+      filter: options.filter,
+      compact: options.compact,
+      zebra: options.zebra,
+      highTable: options.highTable
+    };
     let expectedColumnCount = 0;
     let isHeaderRow = options.header;
+    let headerRowElement = null;
+    let applyState = () => {
+      if (wrapper.style && typeof wrapper.style.setProperty === "function") {
+        wrapper.style.setProperty("--csv-codeblock-max-height", resolveMaxHeight(options.maxHeight, state.highTable));
+      } else {
+        wrapper.style["--csv-codeblock-max-height"] = resolveMaxHeight(options.maxHeight, state.highTable);
+      }
+      toolbar.update(state);
+    };
 
-    wrapper.className = [
-      "csv-codeblock",
-      options.compact ? "csv-codeblock--compact" : "",
-      options.zebra ? "csv-codeblock--zebra" : "",
-      options.sticky ? "csv-codeblock--sticky" : ""
-    ].filter((className) => className.length > 0).join(" ");
-    if (wrapper.style && typeof wrapper.style.setProperty === "function") {
-      wrapper.style.setProperty("--csv-codeblock-max-height", options.maxHeight);
-    } else {
-      wrapper.style["--csv-codeblock-max-height"] = options.maxHeight;
-    }
+    setWrapperClasses(wrapper, state, options.sticky);
     scrollContainer.className = "csv-codeblock__scroll";
     table.className = "csv-codeblock__table";
 
@@ -654,6 +807,15 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
       title.textContent = options.title;
       wrapper.appendChild(title);
     }
+
+    const toolbar = createToolbar(doc, {
+      sort: options.header,
+      filter: options.header
+    }, (key) => {
+      state[key] = !state[key];
+      applyState();
+    });
+    wrapper.appendChild(toolbar.element);
 
     try {
       const parser = new CsvParser(source, resolvedDelimiter);
@@ -707,12 +869,13 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
         if (isHeaderRow) {
           row.className = "csv-codeblock__header-row";
           head.appendChild(row);
+          headerRowElement = row;
           isHeaderRow = false;
         } else {
           dataRows.push({
             element: row,
             values: rowData,
-            searchText: rowData.join(" ").toLowerCase(),
+            searchValues: rowData.map((value) => value.toLowerCase()),
             originalIndex: dataRows.length
           });
           body.appendChild(row);
@@ -724,18 +887,35 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
     }
 
     if (head.childNodes.length > 0) {
+      const filterController = createFilterController(doc, head, headerRowElement, dataRows);
+      const sortController = createSortController(body, sortableHeaders, dataRows);
+      applyState = () => {
+        setWrapperClasses(wrapper, state, options.sticky);
+        if (wrapper.style && typeof wrapper.style.setProperty === "function") {
+          wrapper.style.setProperty("--csv-codeblock-max-height", resolveMaxHeight(options.maxHeight, state.highTable));
+        } else {
+          wrapper.style["--csv-codeblock-max-height"] = resolveMaxHeight(options.maxHeight, state.highTable);
+        }
+        sortController.setEnabled(state.sort && options.header);
+        filterController.setEnabled(state.filter && options.header);
+        toolbar.update(state);
+        updateStickyOffsets(wrapper, headerRowElement);
+      };
+
       table.appendChild(head);
+      table.appendChild(body);
+      wrapper.appendChild(scrollContainer);
+      scrollContainer.appendChild(table);
+      el.appendChild(wrapper);
+      applyState();
+      return;
     }
+
     table.appendChild(body);
-    if (options.sort && options.header) {
-      enableSorting(body, sortableHeaders, dataRows);
-    }
-    if (options.filter) {
-      enableFiltering(doc, wrapper, dataRows);
-    }
     wrapper.appendChild(scrollContainer);
     scrollContainer.appendChild(table);
     el.appendChild(wrapper);
+    applyState();
   }
 
   renderError(el, doc, error) {
