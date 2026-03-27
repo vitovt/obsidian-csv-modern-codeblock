@@ -5,7 +5,8 @@
 .csv-codeblock__scroll {
   max-width: 100%;
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: auto;
+  max-height: 24rem;
 }
 
 .csv-codeblock__table {
@@ -14,5 +15,9 @@
 }
 
 .csv-codeblock__header-row th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background-color: var(--background-primary);
   font-weight: 600;
 }
