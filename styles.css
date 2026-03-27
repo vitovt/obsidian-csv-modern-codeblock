@@ -21,6 +21,12 @@
   width: max-content;
 }
 
+.csv-codeblock--compact .csv-codeblock__table th,
+.csv-codeblock--compact .csv-codeblock__table td {
+  padding: 0.2rem 0.45rem;
+  line-height: 1.3;
+}
+
 .csv-codeblock__header-row th {
   position: sticky;
   top: 0;
