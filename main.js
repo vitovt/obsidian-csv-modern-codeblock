@@ -35,44 +35,24 @@ class CsvParser {
     this.delimiter = delimiter;
   }
 
-  // Split a CSV row taking care of escaping quotes and delimiters
-  parseRow(row) {
-    const result = [];
+  parse() {
+    const rows = [];
+    let currentRow = [];
     let currentField = '';
     let inQuotes = false;
 
-    for (let i = 0; i < row.length; i++) {
-      const char = row[i];
-      const nextChar = row[i + 1];
+    const pushField = () => {
+      currentRow.push(currentField);
+      currentField = '';
+    };
 
-      if (char === '"') {
-        if (inQuotes && nextChar === '"') {
-          // Escaped double-quote
-          currentField += '"';
-          i++;
-        } else {
-          // Toggle inQuotes
-          inQuotes = !inQuotes;
-        }
-      } else if (char === this.delimiter && !inQuotes) {
-        // Field complete
-        result.push(currentField);
-        currentField = '';
-      } else {
-        currentField += char;
+    const pushRow = () => {
+      pushField();
+      if (currentRow.length > 1 || currentRow[0] !== '') {
+        rows.push(currentRow);
       }
-    }
-
-    // Push the last field
-    result.push(currentField);
-    return result;
-  }
-
-  // Split source text into rows
-  parse() {
-    const rows = [];
-    let currentRow = '';
-    let inQuotes = false;
+      currentRow = [];
+    };
 
     for (let i = 0; i < this.source.length; i++) {
       const char = this.source[i];
@@ -80,27 +60,25 @@ class CsvParser {
 
       if (char === '"') {
         if (inQuotes && nextChar === '"') {
-          // Escaped double-quote
-          currentRow += '"';
+          currentField += '"';
           i++;
         } else {
-          // Toggle inQuotes
           inQuotes = !inQuotes;
         }
+      } else if (char === this.delimiter && !inQuotes) {
+        pushField();
       } else if ((char === '\n' || char === '\r') && !inQuotes) {
-        // End of row
-        if (currentRow.length > 0) {
-          rows.push(this.parseRow(currentRow));
-          currentRow = '';
+        if (char === '\r' && nextChar === '\n') {
+          i++;
         }
+        pushRow();
       } else {
-        currentRow += char;
+        currentField += char;
       }
     }
 
-    // Push the last row
-    if (currentRow.length > 0) {
-      rows.push(this.parseRow(currentRow));
+    if (currentField.length > 0 || currentRow.length > 0) {
+      pushRow();
     }
 
     return rows;
