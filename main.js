@@ -441,22 +441,188 @@ function enableFiltering(doc, wrapper, rows) {
   applyFilter();
 }
 
+const DEFAULT_RENDER_OPTIONS = {
+  title: "",
+  header: true,
+  sticky: true,
+  zebra: true,
+  compact: true,
+  sort: true,
+  filter: true,
+  links: true,
+  maxHeight: "24rem",
+  delimiter: "auto"
+};
+
+function normalizeOptionKey(key) {
+  if (key === "max-height") {
+    return "maxHeight";
+  }
+  return key;
+}
+
+function parseBooleanOption(key, rawValue) {
+  if (rawValue === "true" || rawValue === "on" || rawValue === "yes" || rawValue === "1") {
+    return true;
+  }
+  if (rawValue === "false" || rawValue === "off" || rawValue === "no" || rawValue === "0") {
+    return false;
+  }
+  throw new Error(`Invalid boolean value for option "${key}"`);
+}
+
+function parseStringOption(rawValue) {
+  if (rawValue.length >= 2) {
+    const firstChar = rawValue[0];
+    const lastChar = rawValue[rawValue.length - 1];
+    if ((firstChar === '"' || firstChar === "'") && firstChar === lastChar) {
+      return rawValue.slice(1, -1).replace(/\\(["'])/g, "$1");
+    }
+  }
+  return rawValue;
+}
+
+function tokenizeOptionString(optionText) {
+  const tokens = [];
+  let current = "";
+  let quote = "";
+
+  for (let i = 0; i < optionText.length; i++) {
+    const char = optionText[i];
+
+    if (quote) {
+      current += char;
+      if (char === "\\" && i + 1 < optionText.length) {
+        current += optionText[i + 1];
+        i++;
+      } else if (char === quote) {
+        quote = "";
+      }
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      quote = char;
+      current += char;
+      continue;
+    }
+
+    if (/\s/.test(char)) {
+      if (current.length > 0) {
+        tokens.push(current);
+        current = "";
+      }
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (quote) {
+    throw new Error("Unclosed quote in codeblock options");
+  }
+  if (current.length > 0) {
+    tokens.push(current);
+  }
+
+  return tokens;
+}
+
+function parseFenceOptions(optionText, defaultDelimiter) {
+  const options = Object.assign({}, DEFAULT_RENDER_OPTIONS, {
+    delimiter: defaultDelimiter
+  });
+  const tokens = tokenizeOptionString(optionText);
+
+  for (const token of tokens) {
+    const separatorIndex = token.indexOf(":");
+    if (separatorIndex <= 0) {
+      throw new Error(`Invalid codeblock option "${token}"`);
+    }
+
+    const rawKey = token.slice(0, separatorIndex).trim();
+    const key = normalizeOptionKey(rawKey);
+    const rawValue = token.slice(separatorIndex + 1).trim();
+
+    if (rawValue.length === 0) {
+      throw new Error(`Missing value for option "${rawKey}"`);
+    }
+
+    if (key === "title" || key === "maxHeight") {
+      options[key] = parseStringOption(rawValue);
+    } else if (
+      key === "header" ||
+      key === "sticky" ||
+      key === "zebra" ||
+      key === "compact" ||
+      key === "sort" ||
+      key === "filter" ||
+      key === "links"
+    ) {
+      options[key] = parseBooleanOption(rawKey, rawValue);
+    } else if (key === "delimiter") {
+      const value = parseStringOption(rawValue);
+      if (value !== "auto" && value !== "comma" && value !== "semicolon" && value !== "tab") {
+        throw new Error(`Invalid delimiter value "${value}"`);
+      }
+      options.delimiter = value;
+    } else {
+      throw new Error(`Unknown codeblock option "${rawKey}"`);
+    }
+  }
+
+  return options;
+}
+
+function getRenderOptions(ctx, el, defaultDelimiter) {
+  if (!ctx || typeof ctx.getSectionInfo !== "function") {
+    return Object.assign({}, DEFAULT_RENDER_OPTIONS, { delimiter: defaultDelimiter });
+  }
+
+  const sectionInfo = ctx.getSectionInfo(el) || (el.parentElement ? ctx.getSectionInfo(el.parentElement) : null);
+  if (!sectionInfo || typeof sectionInfo.text !== "string") {
+    return Object.assign({}, DEFAULT_RENDER_OPTIONS, { delimiter: defaultDelimiter });
+  }
+
+  const firstLine = sectionInfo.text.split(/\r?\n/, 1)[0];
+  const match = /^\s*(?:`{3,}|~{3,})\s*\S+\s*(.*)$/.exec(firstLine);
+  if (!match || match[1].trim().length === 0) {
+    return Object.assign({}, DEFAULT_RENDER_OPTIONS, { delimiter: defaultDelimiter });
+  }
+
+  return parseFenceOptions(match[1], defaultDelimiter);
+}
+
+function resolveDelimiter(source, configuredDelimiter) {
+  if (configuredDelimiter === "comma") {
+    return ",";
+  }
+  if (configuredDelimiter === "semicolon") {
+    return ";";
+  }
+  if (configuredDelimiter === "tab") {
+    return "\t";
+  }
+  return detectCsvDelimiter(source);
+}
+
 
 class CsvCodeBlockPlugin extends import_obsidian.Plugin {
   async onload() {
     // Register CSV code block processor
     this.registerMarkdownCodeBlockProcessor("csv", (source, el, ctx) => {
-      this.renderTable(source, el, "auto");
+      this.renderTable(source, el, ctx, "auto");
     });
 
     // Register TSV code block processor
     this.registerMarkdownCodeBlockProcessor("tsv", (source, el, ctx) => {
-      this.renderTable(source, el, "\t");
+      this.renderTable(source, el, ctx, "tab");
     });
   }
 
-  renderTable(source, el, delimiter) {
-    const resolvedDelimiter = delimiter === "auto" ? detectCsvDelimiter(source) : delimiter;
+  renderTable(source, el, ctx, defaultDelimiter) {
+    const options = getRenderOptions(ctx, el, defaultDelimiter);
+    const resolvedDelimiter = resolveDelimiter(source, options.delimiter);
     const doc = el.ownerDocument;
     const wrapper = doc.createElement("div");
     const scrollContainer = doc.createElement("div");
@@ -466,11 +632,28 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
     const sortableHeaders = [];
     const dataRows = [];
     let expectedColumnCount = 0;
-    let isHeaderRow = true;
+    let isHeaderRow = options.header;
 
-    wrapper.className = "csv-codeblock csv-codeblock--compact csv-codeblock--zebra";
+    wrapper.className = [
+      "csv-codeblock",
+      options.compact ? "csv-codeblock--compact" : "",
+      options.zebra ? "csv-codeblock--zebra" : "",
+      options.sticky ? "csv-codeblock--sticky" : ""
+    ].filter((className) => className.length > 0).join(" ");
+    if (wrapper.style && typeof wrapper.style.setProperty === "function") {
+      wrapper.style.setProperty("--csv-codeblock-max-height", options.maxHeight);
+    } else {
+      wrapper.style["--csv-codeblock-max-height"] = options.maxHeight;
+    }
     scrollContainer.className = "csv-codeblock__scroll";
     table.className = "csv-codeblock__table";
+
+    if (options.title.length > 0) {
+      const title = doc.createElement("div");
+      title.className = "csv-codeblock__title";
+      title.textContent = options.title;
+      wrapper.appendChild(title);
+    }
 
     try {
       const parser = new CsvParser(source, resolvedDelimiter);
@@ -512,7 +695,11 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
               indicator
             });
           } else {
-            createCellContent(doc, cell, rowData[i]);
+            if (options.links) {
+              createCellContent(doc, cell, rowData[i]);
+            } else {
+              cell.textContent = rowData[i];
+            }
           }
           row.appendChild(cell);
         }
@@ -539,8 +726,12 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
       table.appendChild(head);
     }
     table.appendChild(body);
-    enableSorting(body, sortableHeaders, dataRows);
-    enableFiltering(doc, wrapper, dataRows);
+    if (options.sort && options.header) {
+      enableSorting(body, sortableHeaders, dataRows);
+    }
+    if (options.filter) {
+      enableFiltering(doc, wrapper, dataRows);
+    }
     wrapper.appendChild(scrollContainer);
     scrollContainer.appendChild(table);
     el.appendChild(wrapper);
