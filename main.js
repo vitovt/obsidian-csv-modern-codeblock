@@ -495,6 +495,8 @@ function createFilterController(doc, head, headerRow, rows) {
   if (!headerRow || rows.length === 0) {
     return {
       setEnabled() {
+      },
+      refresh() {
       }
     };
   }
@@ -583,12 +585,21 @@ function renderDataCellContent(doc, cell, value, linksEnabled) {
   }
 }
 
-function createEditController(plugin, doc, table, sourceRows, dataRows, editContext, onRowsChanged) {
+function createEditController(plugin, doc, table, sourceRows, dataRows, editContext, onRowsChanged, onDirtyChanged) {
   let enabled = false;
   let activeEdit = null;
   let saving = false;
+  let dirty = false;
 
   const findDataRow = (sourceRowIndex) => dataRows.find((row) => row.sourceRowIndex === sourceRowIndex);
+
+  const setDirty = (nextDirty) => {
+    if (dirty === nextDirty) {
+      return;
+    }
+    dirty = nextDirty;
+    onDirtyChanged(dirty);
+  };
 
   const restoreCell = (edit, value) => {
     edit.cell.classList.remove("csv-codeblock__cell--editing", "csv-codeblock__cell--saving", "csv-codeblock__cell--error");
@@ -616,8 +627,8 @@ function createEditController(plugin, doc, table, sourceRows, dataRows, editCont
     restoreCell(edit, sourceRows[edit.sourceRowIndex][edit.sourceColumnIndex] || "");
   };
 
-  const saveActiveEdit = async () => {
-    if (!activeEdit || saving) {
+  const commitActiveEdit = () => {
+    if (!activeEdit) {
       return;
     }
 
@@ -631,14 +642,38 @@ function createEditController(plugin, doc, table, sourceRows, dataRows, editCont
       return;
     }
 
+    sourceRows[edit.sourceRowIndex][edit.sourceColumnIndex] = nextValue;
+
+    if (!edit.isHeader) {
+      const dataRow = findDataRow(edit.sourceRowIndex);
+      if (dataRow) {
+        dataRow.values[edit.sourceColumnIndex] = nextValue;
+        dataRow.searchValues[edit.sourceColumnIndex] = nextValue.toLowerCase();
+      }
+    }
+
+    activeEdit = null;
+    restoreCell(edit, nextValue);
+    setDirty(true);
+    onRowsChanged();
+  };
+
+  const saveSession = async () => {
+    if (saving) {
+      return false;
+    }
+
+    commitActiveEdit();
+
+    if (!dirty) {
+      return true;
+    }
+
     saving = true;
-    edit.cell.classList.add("csv-codeblock__cell--saving");
-    edit.cell.classList.remove("csv-codeblock__cell--error");
+    table.classList.add("csv-codeblock__table--saving");
 
     try {
-      const nextRows = sourceRows.map((row) => row.slice());
-      nextRows[edit.sourceRowIndex][edit.sourceColumnIndex] = nextValue;
-      const nextSource = serializeCsvRows(nextRows, editContext.delimiter);
+      const nextSource = serializeCsvRows(sourceRows, editContext.delimiter);
 
       await replaceCodeBlockSource(
         plugin,
@@ -649,30 +684,18 @@ function createEditController(plugin, doc, table, sourceRows, dataRows, editCont
       );
 
       editContext.sourceRef.value = nextSource;
-      sourceRows[edit.sourceRowIndex][edit.sourceColumnIndex] = nextValue;
-
-      if (!edit.isHeader) {
-        const dataRow = findDataRow(edit.sourceRowIndex);
-        if (dataRow) {
-          dataRow.values[edit.sourceColumnIndex] = nextValue;
-          dataRow.searchValues[edit.sourceColumnIndex] = nextValue.toLowerCase();
-        }
-      }
-
-      activeEdit = null;
-      restoreCell(edit, nextValue);
-      onRowsChanged();
+      setDirty(false);
+      return true;
     } catch (error) {
-      edit.cell.classList.add("csv-codeblock__cell--error");
       showCsvEditError(error);
-      edit.editor.focus();
+      return false;
     } finally {
       saving = false;
-      edit.cell.classList.remove("csv-codeblock__cell--saving");
+      table.classList.remove("csv-codeblock__table--saving");
     }
   };
 
-  const startEdit = async (cell) => {
+  const startEdit = (cell) => {
     if (saving) {
       return;
     }
@@ -681,7 +704,7 @@ function createEditController(plugin, doc, table, sourceRows, dataRows, editCont
       return;
     }
     if (activeEdit) {
-      await saveActiveEdit();
+      commitActiveEdit();
       if (activeEdit) {
         return;
       }
@@ -732,12 +755,12 @@ function createEditController(plugin, doc, table, sourceRows, dataRows, editCont
         cancelActiveEdit();
       } else if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
         event.preventDefault();
-        void saveActiveEdit();
+        commitActiveEdit();
       }
     });
 
     editor.addEventListener("blur", () => {
-      void saveActiveEdit();
+      commitActiveEdit();
     });
 
     editor.focus();
@@ -761,7 +784,7 @@ function createEditController(plugin, doc, table, sourceRows, dataRows, editCont
 
     event.preventDefault();
     event.stopPropagation();
-    void startEdit(cell);
+    startEdit(cell);
   }, true);
 
   return {
@@ -770,6 +793,12 @@ function createEditController(plugin, doc, table, sourceRows, dataRows, editCont
       if (!enabled) {
         cancelActiveEdit();
       }
+    },
+    async saveSession() {
+      return saveSession();
+    },
+    isDirty() {
+      return dirty;
     }
   };
 }
@@ -824,12 +853,16 @@ function updateStickyOffsets(wrapper, headerRow) {
   }
 }
 
-function setToolbarButtonState(button, pressed) {
+function setToolbarButtonState(button, pressed, dirty = false) {
   const label = button.dataset.label || button.textContent || "";
-  button.className = pressed ? "csv-codeblock__toolbar-button csv-codeblock__toolbar-button--pressed" : "csv-codeblock__toolbar-button";
-  button.textContent = `${pressed ? "✔️" : "〰️"} ${label}`;
+  button.className = [
+    "csv-codeblock__toolbar-button",
+    pressed ? "csv-codeblock__toolbar-button--pressed" : "",
+    dirty ? "csv-codeblock__toolbar-button--dirty" : ""
+  ].filter((className) => className.length > 0).join(" ");
+  button.textContent = `${pressed ? "[x]" : "[ ]"} ${label}${dirty ? " *" : ""}`;
   button.setAttribute("aria-pressed", pressed ? "true" : "false");
-  button.setAttribute("aria-label", `${label}: ${pressed ? "enabled" : "disabled"}`);
+  button.setAttribute("aria-label", `${label}: ${pressed ? "enabled" : "disabled"}${dirty ? ", unsaved changes" : ""}`);
 }
 
 function createToolbar(doc, features, onToggle) {
@@ -873,7 +906,7 @@ function createToolbar(doc, features, onToggle) {
         if (!buttons[control.key] || !control.available) {
           continue;
         }
-        setToolbarButtonState(buttons[control.key], state[control.key]);
+        setToolbarButtonState(buttons[control.key], state[control.key], control.key === "edit" && state.editDirty);
       }
     }
   };
@@ -1090,7 +1123,8 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
       compact: options.compact,
       zebra: options.zebra,
       highTable: options.highTable,
-      edit: options.edit
+      edit: options.edit && canEditSource,
+      editDirty: false
     };
     let expectedColumnCount = 0;
     let isHeaderRow = options.header;
@@ -1109,6 +1143,12 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
     };
     let editController = {
       setEnabled() {
+      },
+      async saveSession() {
+        return true;
+      },
+      isDirty() {
+        return false;
       }
     };
     let applyState = () => {
@@ -1133,7 +1173,21 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
       sort: options.header,
       filter: options.header,
       edit: canEditSource
-    }, (key) => {
+    }, async (key) => {
+      if (key === "edit" && state.edit) {
+        const saved = await editController.saveSession();
+        if (!saved) {
+          state.edit = true;
+          state.editDirty = editController.isDirty();
+          applyState();
+          return;
+        }
+        state.edit = false;
+        state.editDirty = false;
+        applyState();
+        return;
+      }
+
       state[key] = !state[key];
       applyState();
     });
@@ -1227,6 +1281,9 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
       }, () => {
         filterController.refresh();
         sortController.refresh();
+      }, (dirty) => {
+        state.editDirty = dirty;
+        toolbar.update(state);
       });
       applyState = () => {
         setWrapperClasses(wrapper, state, options.sticky);
@@ -1256,6 +1313,9 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
     }, () => {
       filterController.refresh();
       sortController.refresh();
+    }, (dirty) => {
+      state.editDirty = dirty;
+      toolbar.update(state);
     });
     table.appendChild(body);
     wrapper.appendChild(scrollContainer);

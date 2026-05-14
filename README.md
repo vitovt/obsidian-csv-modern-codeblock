@@ -30,7 +30,7 @@ Markdown tables are tedious when the data is large, frequently edited, copied fr
 - Keeps header rows sticky by default
 - Uses a vertically scrollable table area for tall datasets
 - Adds a toolbar with optional controls for sorting, per-column filtering, compact mode, zebra striping, high-table mode, and single-cell editing
-- Writes edited cells back to the source fenced code block in the Markdown file
+- Buffers edited cells during `EditMode` and writes them back to the source fenced code block in one save
 - Supports per-codeblock options for title, layout, filtering, sorting, links, delimiter selection, and height
 
 ## Performance And Implementation Improvements
@@ -90,7 +90,7 @@ Each rendered table includes a toolbar above it:
 
 These controls change only the rendered view. They do not modify your source data.
 
-`EditMode` is the exception: when it is enabled, clicking a table cell opens an inline editor. The edit is saved back to the fenced code block in the Markdown file when the editor loses focus or when you press `Ctrl+Enter` / `Cmd+Enter`. Press `Escape` to cancel the active cell edit. Sorting and filtering can stay enabled; edited rows are mapped back to their original CSV row before saving.
+`EditMode` is the exception: when it is enabled, clicking a table cell opens an inline editor. Leaving the editor or pressing `Ctrl+Enter` / `Cmd+Enter` applies that cell to the rendered table without writing the Markdown file yet. Press `Escape` to cancel the active cell edit. When there are buffered changes, the `EditMode` button shows `*`. Press `EditMode` again to write all buffered changes back to the fenced code block in one save. Sorting and filtering can stay enabled; edited rows are mapped back to their original CSV row before saving.
 
 ## Codeblock Options
 

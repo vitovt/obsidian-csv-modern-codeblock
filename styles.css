@@ -53,6 +53,10 @@
   opacity: 0.75;
 }
 
+.csv-codeblock__table--saving {
+  opacity: 0.75;
+}
+
 .csv-codeblock__cell--error {
   outline-color: var(--text-error);
 }
@@ -108,6 +112,11 @@
   border-color: var(--interactive-accent);
   color: var(--text-on-accent);
   box-shadow: inset 0 0 0 1px var(--background-primary), 0 0 0 1px var(--interactive-accent);
+}
+
+.csv-codeblock__toolbar-button--dirty {
+  border-color: var(--text-warning, var(--interactive-accent));
+  box-shadow: inset 0 0 0 1px var(--text-warning, var(--interactive-accent));
 }
 
 .csv-codeblock__toolbar-button--disabled,
