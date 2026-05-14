@@ -29,7 +29,8 @@ Markdown tables are tedious when the data is large, frequently edited, copied fr
 - Detects `http`, `https`, and `mailto` values and renders them as links
 - Keeps header rows sticky by default
 - Uses a vertically scrollable table area for tall datasets
-- Adds a toolbar with optional view controls for sorting, per-column filtering, compact mode, zebra striping, and high-table mode
+- Adds a toolbar with optional controls for sorting, per-column filtering, compact mode, zebra striping, high-table mode, and single-cell editing
+- Writes edited cells back to the source fenced code block in the Markdown file
 - Supports per-codeblock options for title, layout, filtering, sorting, links, delimiter selection, and height
 
 ## Performance And Implementation Improvements
@@ -54,6 +55,7 @@ Compared with the earlier plugin idea, this rewrite adds:
 - Compact mode is off until you press `Compact`
 - Zebra striping is off until you press `Zebra`
 - High-table mode is off until you press `High table`
+- Cell editing is off until you press `EditMode`
 
 ## Basic Usage
 
@@ -84,15 +86,18 @@ Each rendered table includes a toolbar above it:
 - `Compact` switches to fit-to-width mode
 - `Zebra` toggles alternating row striping
 - `High table` doubles the vertical scroll height
+- `EditMode` enables single-click cell editing
 
 These controls change only the rendered view. They do not modify your source data.
+
+`EditMode` is the exception: when it is enabled, clicking a table cell opens an inline editor. The edit is saved back to the fenced code block in the Markdown file when the editor loses focus or when you press `Ctrl+Enter` / `Cmd+Enter`. Press `Escape` to cancel the active cell edit. Sorting and filtering can stay enabled; edited rows are mapped back to their original CSV row before saving.
 
 ## Codeblock Options
 
 You can set per-table defaults directly on the opening fence line:
 
 ````markdown
-```csv title:"Folktales" sort:true filter:true compact:true zebra:true high-table:true
+```csv title:"Folktales" sort:true filter:true compact:true zebra:true high-table:true edit:true
 Nr.;Titel;Quelle
 1;Der Froschkönig;https://projekt-gutenberg.org/
 ```
@@ -108,6 +113,7 @@ Supported options:
 - `compact:true|false`
 - `zebra:true|false`
 - `high-table:true|false`
+- `edit:true|false`
 - `links:true|false`
 - `delimiter:auto|comma|semicolon|tab`
 - `max-height:<css-size>`

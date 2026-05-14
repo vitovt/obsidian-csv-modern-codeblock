@@ -39,6 +39,39 @@
   word-break: break-word;
 }
 
+.csv-codeblock--edit-mode .csv-codeblock__table th[data-source-row-index],
+.csv-codeblock--edit-mode .csv-codeblock__table td[data-source-row-index] {
+  cursor: text;
+}
+
+.csv-codeblock__cell--editing {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: -2px;
+}
+
+.csv-codeblock__cell--saving {
+  opacity: 0.75;
+}
+
+.csv-codeblock__cell--error {
+  outline-color: var(--text-error);
+}
+
+.csv-codeblock__cell-editor {
+  display: block;
+  width: 100%;
+  min-width: 10rem;
+  min-height: 2rem;
+  box-sizing: border-box;
+  resize: vertical;
+  font: inherit;
+  color: var(--text-normal);
+  background: var(--background-primary);
+  border: 1px solid var(--interactive-accent);
+  border-radius: 4px;
+  padding: 0.2rem 0.35rem;
+}
+
 .csv-codeblock--sticky .csv-codeblock__header-row th {
   position: sticky;
   top: 0;

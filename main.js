@@ -300,6 +300,91 @@ function createCellContent(doc, cell, text) {
   cell.textContent = text;
 }
 
+function serializeCsvField(value, delimiter) {
+  const text = String(value == null ? "" : value);
+  const needsQuotes = text.includes('"') ||
+    text.includes("\n") ||
+    text.includes("\r") ||
+    text.includes(delimiter) ||
+    /^[ \t]/.test(text) ||
+    /[ \t]$/.test(text);
+
+  if (!needsQuotes) {
+    return text;
+  }
+
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function serializeCsvRows(rows, delimiter) {
+  return rows.map((row) => row.map((value) => serializeCsvField(value, delimiter)).join(delimiter)).join("\n");
+}
+
+function normalizeSourceText(source) {
+  return source.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
+function getCodeBlockSectionInfo(ctx, el) {
+  if (!ctx || typeof ctx.getSectionInfo !== "function") {
+    return null;
+  }
+
+  return ctx.getSectionInfo(el) || (el.parentElement ? ctx.getSectionInfo(el.parentElement) : null);
+}
+
+function getSourceFile(app, ctx) {
+  const sourcePath = ctx && typeof ctx.sourcePath === "string" ? ctx.sourcePath : "";
+  if (sourcePath.length > 0) {
+    const sourceFile = app.vault.getAbstractFileByPath(sourcePath);
+    if (sourceFile instanceof import_obsidian.TFile) {
+      return sourceFile;
+    }
+  }
+
+  return null;
+}
+
+function countSourceLines(source) {
+  return source.length === 0 ? 1 : source.split(/\r?\n/).length;
+}
+
+async function replaceCodeBlockSource(plugin, ctx, sectionInfo, previousSource, nextSource) {
+  if (!sectionInfo || typeof sectionInfo.lineStart !== "number" || typeof sectionInfo.lineEnd !== "number") {
+    throw new Error("Cannot locate the source code block in the note");
+  }
+
+  const sourceFile = getSourceFile(plugin.app, ctx);
+  if (!sourceFile) {
+    throw new Error("Cannot locate the note file for this rendered table");
+  }
+
+  const fileText = await plugin.app.vault.read(sourceFile);
+  const newline = fileText.includes("\r\n") ? "\r\n" : "\n";
+  const lines = fileText.split(/\r?\n/);
+  const bodyStart = sectionInfo.lineStart + 1;
+  const bodyEnd = sectionInfo.lineEnd;
+
+  if (bodyStart < 0 || bodyEnd < bodyStart || bodyEnd > lines.length) {
+    throw new Error("The source code block range is no longer valid");
+  }
+
+  const currentBody = lines.slice(bodyStart, bodyEnd).join("\n");
+  if (normalizeSourceText(currentBody) !== normalizeSourceText(previousSource)) {
+    throw new Error("The source CSV block changed after this table was rendered");
+  }
+
+  const replacementLines = nextSource.length === 0 ? [""] : nextSource.split(/\r?\n/);
+  const nextText = lines.slice(0, bodyStart).concat(replacementLines, lines.slice(bodyEnd)).join(newline);
+
+  await plugin.app.vault.modify(sourceFile, nextText);
+  sectionInfo.lineEnd += replacementLines.length - countSourceLines(previousSource);
+}
+
+function showCsvEditError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  new import_obsidian.Notice(`CSV edit failed: ${message}`);
+}
+
 function compareCellValues(leftValue, rightValue) {
   const leftText = leftValue.trim();
   const rightText = rightValue.trim();
@@ -401,7 +486,8 @@ function createSortController(body, headers, rows) {
 
   setEnabled(false);
   return {
-    setEnabled
+    setEnabled,
+    refresh: applySort
   };
 }
 
@@ -483,7 +569,208 @@ function createFilterController(doc, head, headerRow, rows) {
 
   setEnabled(false);
   return {
-    setEnabled
+    setEnabled,
+    refresh: applyFilter
+  };
+}
+
+function renderDataCellContent(doc, cell, value, linksEnabled) {
+  cell.replaceChildren();
+  if (linksEnabled) {
+    createCellContent(doc, cell, value);
+  } else {
+    cell.textContent = value;
+  }
+}
+
+function createEditController(plugin, doc, table, sourceRows, dataRows, editContext, onRowsChanged) {
+  let enabled = false;
+  let activeEdit = null;
+  let saving = false;
+
+  const findDataRow = (sourceRowIndex) => dataRows.find((row) => row.sourceRowIndex === sourceRowIndex);
+
+  const restoreCell = (edit, value) => {
+    edit.cell.classList.remove("csv-codeblock__cell--editing", "csv-codeblock__cell--saving", "csv-codeblock__cell--error");
+
+    if (edit.isHeader) {
+      edit.editor.remove();
+      for (const node of edit.hiddenNodes) {
+        node.hidden = false;
+      }
+      if (edit.label) {
+        edit.label.textContent = value;
+      }
+      return;
+    }
+
+    renderDataCellContent(doc, edit.cell, value, editContext.links);
+  };
+
+  const cancelActiveEdit = () => {
+    if (!activeEdit) {
+      return;
+    }
+    const edit = activeEdit;
+    activeEdit = null;
+    restoreCell(edit, sourceRows[edit.sourceRowIndex][edit.sourceColumnIndex] || "");
+  };
+
+  const saveActiveEdit = async () => {
+    if (!activeEdit || saving) {
+      return;
+    }
+
+    const edit = activeEdit;
+    const nextValue = edit.editor.value;
+    const previousValue = sourceRows[edit.sourceRowIndex][edit.sourceColumnIndex] || "";
+
+    if (nextValue === previousValue) {
+      activeEdit = null;
+      restoreCell(edit, previousValue);
+      return;
+    }
+
+    saving = true;
+    edit.cell.classList.add("csv-codeblock__cell--saving");
+    edit.cell.classList.remove("csv-codeblock__cell--error");
+
+    try {
+      const nextRows = sourceRows.map((row) => row.slice());
+      nextRows[edit.sourceRowIndex][edit.sourceColumnIndex] = nextValue;
+      const nextSource = serializeCsvRows(nextRows, editContext.delimiter);
+
+      await replaceCodeBlockSource(
+        plugin,
+        editContext.ctx,
+        editContext.sectionInfo,
+        editContext.sourceRef.value,
+        nextSource
+      );
+
+      editContext.sourceRef.value = nextSource;
+      sourceRows[edit.sourceRowIndex][edit.sourceColumnIndex] = nextValue;
+
+      if (!edit.isHeader) {
+        const dataRow = findDataRow(edit.sourceRowIndex);
+        if (dataRow) {
+          dataRow.values[edit.sourceColumnIndex] = nextValue;
+          dataRow.searchValues[edit.sourceColumnIndex] = nextValue.toLowerCase();
+        }
+      }
+
+      activeEdit = null;
+      restoreCell(edit, nextValue);
+      onRowsChanged();
+    } catch (error) {
+      edit.cell.classList.add("csv-codeblock__cell--error");
+      showCsvEditError(error);
+      edit.editor.focus();
+    } finally {
+      saving = false;
+      edit.cell.classList.remove("csv-codeblock__cell--saving");
+    }
+  };
+
+  const startEdit = async (cell) => {
+    if (saving) {
+      return;
+    }
+    if (activeEdit && activeEdit.cell === cell) {
+      activeEdit.editor.focus();
+      return;
+    }
+    if (activeEdit) {
+      await saveActiveEdit();
+      if (activeEdit) {
+        return;
+      }
+    }
+
+    const sourceRowIndex = Number(cell.dataset.sourceRowIndex);
+    const sourceColumnIndex = Number(cell.dataset.sourceColumnIndex);
+    if (!Number.isInteger(sourceRowIndex) || !Number.isInteger(sourceColumnIndex) || !sourceRows[sourceRowIndex]) {
+      return;
+    }
+
+    const isHeader = cell.dataset.csvCodeblockHeader === "true";
+    const value = sourceRows[sourceRowIndex][sourceColumnIndex] || "";
+    const editor = doc.createElement("textarea");
+    const hiddenNodes = [];
+
+    editor.className = "csv-codeblock__cell-editor";
+    editor.value = value;
+    editor.rows = Math.min(8, Math.max(1, value.split(/\r?\n/).length));
+    editor.setAttribute("aria-label", `Edit cell row ${sourceRowIndex + 1}, column ${sourceColumnIndex + 1}`);
+
+    if (isHeader) {
+      for (const node of Array.from(cell.childNodes)) {
+        if (node.nodeType === 1) {
+          node.hidden = true;
+          hiddenNodes.push(node);
+        }
+      }
+      cell.appendChild(editor);
+    } else {
+      cell.replaceChildren(editor);
+    }
+
+    cell.classList.add("csv-codeblock__cell--editing");
+    activeEdit = {
+      cell,
+      editor,
+      hiddenNodes,
+      isHeader,
+      label: isHeader ? cell.csvCodeblockHeaderLabel : null,
+      sourceRowIndex,
+      sourceColumnIndex
+    };
+
+    editor.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        cancelActiveEdit();
+      } else if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        void saveActiveEdit();
+      }
+    });
+
+    editor.addEventListener("blur", () => {
+      void saveActiveEdit();
+    });
+
+    editor.focus();
+    editor.select();
+  };
+
+  table.addEventListener("mousedown", (event) => {
+    if (!enabled) {
+      return;
+    }
+
+    const target = event.target;
+    if (activeEdit && target && activeEdit.editor.contains(target)) {
+      return;
+    }
+
+    const cell = target && typeof target.closest === "function" ? target.closest("td, th") : null;
+    if (!cell || !table.contains(cell) || !cell.dataset || cell.dataset.sourceRowIndex == null) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    void startEdit(cell);
+  }, true);
+
+  return {
+    setEnabled(nextEnabled) {
+      enabled = nextEnabled;
+      if (!enabled) {
+        cancelActiveEdit();
+      }
+    }
   };
 }
 
@@ -514,6 +801,7 @@ function setWrapperClasses(wrapper, state, stickyEnabled) {
     state.compact ? "csv-codeblock--compact" : "",
     state.zebra ? "csv-codeblock--zebra" : "",
     state.highTable ? "csv-codeblock--high-table" : "",
+    state.edit ? "csv-codeblock--edit-mode" : "",
     stickyEnabled ? "csv-codeblock--sticky" : ""
   ].filter((className) => className.length > 0).join(" ");
 }
@@ -552,7 +840,8 @@ function createToolbar(doc, features, onToggle) {
     { key: "filter", label: "Filtering", available: features.filter },
     { key: "compact", label: "Compact", available: true },
     { key: "zebra", label: "Zebra", available: true },
-    { key: "highTable", label: "High table", available: true }
+    { key: "highTable", label: "High table", available: true },
+    { key: "edit", label: "EditMode", available: features.edit }
   ];
 
   toolbar.className = "csv-codeblock__toolbar";
@@ -599,6 +888,7 @@ const DEFAULT_RENDER_OPTIONS = {
   sort: false,
   filter: false,
   highTable: false,
+  edit: false,
   links: true,
   maxHeight: "24rem",
   delimiter: "auto"
@@ -610,6 +900,9 @@ function normalizeOptionKey(key) {
   }
   if (key === "high-table") {
     return "highTable";
+  }
+  if (key === "edit-mode") {
+    return "edit";
   }
   return key;
 }
@@ -711,6 +1004,7 @@ function parseFenceOptions(optionText, defaultDelimiter) {
       key === "sort" ||
       key === "filter" ||
       key === "highTable" ||
+      key === "edit" ||
       key === "links"
     ) {
       options[key] = parseBooleanOption(rawKey, rawValue);
@@ -729,11 +1023,7 @@ function parseFenceOptions(optionText, defaultDelimiter) {
 }
 
 function getRenderOptions(ctx, el, defaultDelimiter) {
-  if (!ctx || typeof ctx.getSectionInfo !== "function") {
-    return Object.assign({}, DEFAULT_RENDER_OPTIONS, { delimiter: defaultDelimiter });
-  }
-
-  const sectionInfo = ctx.getSectionInfo(el) || (el.parentElement ? ctx.getSectionInfo(el.parentElement) : null);
+  const sectionInfo = getCodeBlockSectionInfo(ctx, el);
   if (!sectionInfo || typeof sectionInfo.text !== "string") {
     return Object.assign({}, DEFAULT_RENDER_OPTIONS, { delimiter: defaultDelimiter });
   }
@@ -775,6 +1065,13 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
   }
 
   renderTable(source, el, ctx, defaultDelimiter) {
+    const sectionInfo = getCodeBlockSectionInfo(ctx, el);
+    const editableSectionInfo = sectionInfo ? Object.assign({}, sectionInfo) : null;
+    const sourcePath = ctx && typeof ctx.sourcePath === "string" ? ctx.sourcePath : "";
+    const canEditSource = !!editableSectionInfo &&
+      sourcePath.length > 0 &&
+      typeof editableSectionInfo.lineStart === "number" &&
+      typeof editableSectionInfo.lineEnd === "number";
     const options = getRenderOptions(ctx, el, defaultDelimiter);
     const resolvedDelimiter = resolveDelimiter(source, options.delimiter);
     const doc = el.ownerDocument;
@@ -785,18 +1082,39 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
     const body = doc.createElement("tbody");
     const sortableHeaders = [];
     const dataRows = [];
+    const sourceRows = [];
+    const sourceRef = { value: source };
     const state = {
       sort: options.sort,
       filter: options.filter,
       compact: options.compact,
       zebra: options.zebra,
-      highTable: options.highTable
+      highTable: options.highTable,
+      edit: options.edit
     };
     let expectedColumnCount = 0;
     let isHeaderRow = options.header;
     let headerRowElement = null;
+    let sortController = {
+      setEnabled() {
+      },
+      refresh() {
+      }
+    };
+    let filterController = {
+      setEnabled() {
+      },
+      refresh() {
+      }
+    };
+    let editController = {
+      setEnabled() {
+      }
+    };
     let applyState = () => {
+      setWrapperClasses(wrapper, state, options.sticky);
       setCssVariable(wrapper, "--csv-codeblock-max-height", resolveMaxHeight(options.maxHeight, state.highTable));
+      editController.setEnabled(state.edit && canEditSource);
       toolbar.update(state);
     };
 
@@ -813,7 +1131,8 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
 
     const toolbar = createToolbar(doc, {
       sort: options.header,
-      filter: options.header
+      filter: options.header,
+      edit: canEditSource
     }, (key) => {
       state[key] = !state[key];
       applyState();
@@ -834,13 +1153,18 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
             rowNumber
           );
         }
+        const sourceRowIndex = sourceRows.length;
+        sourceRows.push(rowData);
         const row = doc.createElement("tr");
         const cellTag = isHeaderRow ? "th" : "td";
         for (let i = 0; i < rowData.length; i++) {
           const cell = doc.createElement(cellTag);
+          cell.dataset.sourceRowIndex = String(sourceRowIndex);
+          cell.dataset.sourceColumnIndex = String(i);
           if (isHeaderRow) {
             cell.scope = "col";
             cell.className = "csv-codeblock__header-cell";
+            cell.dataset.csvCodeblockHeader = "true";
             const button = doc.createElement("button");
             const label = doc.createElement("span");
             const indicator = doc.createElement("span");
@@ -854,6 +1178,7 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
             button.appendChild(label);
             button.appendChild(indicator);
             cell.appendChild(button);
+            cell.csvCodeblockHeaderLabel = label;
 
             sortableHeaders.push({
               button,
@@ -879,7 +1204,8 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
             element: row,
             values: rowData,
             searchValues: rowData.map((value) => value.toLowerCase()),
-            originalIndex: dataRows.length
+            originalIndex: dataRows.length,
+            sourceRowIndex
           });
           body.appendChild(row);
         }
@@ -890,13 +1216,24 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
     }
 
     if (head.childNodes.length > 0) {
-      const filterController = createFilterController(doc, head, headerRowElement, dataRows);
-      const sortController = createSortController(body, sortableHeaders, dataRows);
+      filterController = createFilterController(doc, head, headerRowElement, dataRows);
+      sortController = createSortController(body, sortableHeaders, dataRows);
+      editController = createEditController(this, doc, table, sourceRows, dataRows, {
+        ctx,
+        sectionInfo: editableSectionInfo,
+        sourceRef,
+        delimiter: resolvedDelimiter,
+        links: options.links
+      }, () => {
+        filterController.refresh();
+        sortController.refresh();
+      });
       applyState = () => {
         setWrapperClasses(wrapper, state, options.sticky);
         setCssVariable(wrapper, "--csv-codeblock-max-height", resolveMaxHeight(options.maxHeight, state.highTable));
         sortController.setEnabled(state.sort && options.header);
         filterController.setEnabled(state.filter && options.header);
+        editController.setEnabled(state.edit && canEditSource);
         toolbar.update(state);
         updateStickyOffsets(wrapper, headerRowElement);
       };
@@ -910,6 +1247,16 @@ class CsvCodeBlockPlugin extends import_obsidian.Plugin {
       return;
     }
 
+    editController = createEditController(this, doc, table, sourceRows, dataRows, {
+      ctx,
+      sectionInfo: editableSectionInfo,
+      sourceRef,
+      delimiter: resolvedDelimiter,
+      links: options.links
+    }, () => {
+      filterController.refresh();
+      sortController.refresh();
+    });
     table.appendChild(body);
     wrapper.appendChild(scrollContainer);
     scrollContainer.appendChild(table);
