@@ -860,7 +860,7 @@ function setToolbarButtonState(button, pressed, dirty = false) {
     pressed ? "csv-codeblock__toolbar-button--pressed" : "",
     dirty ? "csv-codeblock__toolbar-button--dirty" : ""
   ].filter((className) => className.length > 0).join(" ");
-  button.textContent = `${pressed ? "[x]" : "[ ]"} ${label}${dirty ? " *" : ""}`;
+  button.textContent = `${pressed ? "✔" : "〰"} ${label}${dirty ? " *" : ""}`;
   button.setAttribute("aria-pressed", pressed ? "true" : "false");
   button.setAttribute("aria-label", `${label}: ${pressed ? "enabled" : "disabled"}${dirty ? ", unsaved changes" : ""}`);
 }
