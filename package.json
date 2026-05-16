@@ -1,0 +1,29 @@
+{
+  "name": "obsidian-csv-modern-codeblock",
+  "version": "1.1.1",
+  "description": "Render and edit CSV and TSV code blocks as interactive tables in Obsidian.",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production",
+    "lint": "eslint \"src/**/*.ts\""
+  },
+  "keywords": [
+    "obsidian",
+    "obsidian-plugin",
+    "csv",
+    "tsv",
+    "tables"
+  ],
+  "author": "vitovt",
+  "license": "MIT",
+  "devDependencies": {
+    "@typescript-eslint/parser": "^8.32.1",
+    "builtin-modules": "^5.0.0",
+    "esbuild": "^0.25.4",
+    "eslint": "^9.27.0",
+    "eslint-plugin-obsidianmd": "^0.3.0",
+    "obsidian": "^1.8.7",
+    "typescript": "^5.8.3"
+  }
+}

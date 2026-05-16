@@ -1,7 +1,7 @@
 {
 	"id": "csv-modern-codeblock",
 	"name": "CSV Modern Codeblock",
-	"version": "1.1.0",
+	"version": "1.1.1",
 	"minAppVersion": "0.15.0",
 	"description": "Render and edit CSV and TSV code blocks as interactive tables with sticky headers, filters, sorting, layout toggles, link detection, and CSV validation.",
 	"author": "vitovt",

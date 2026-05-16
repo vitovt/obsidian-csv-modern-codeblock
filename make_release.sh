@@ -5,12 +5,17 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-for required_file in manifest.json main.js styles.css; do
+for required_file in manifest.json styles.css package.json package-lock.json src/main.ts; do
   if [[ ! -f "$required_file" ]]; then
     echo "Error: required file '$required_file' is missing." >&2
     exit 1
   fi
 done
+
+if ! command -v npm >/dev/null 2>&1; then
+  echo "Error: npm is not installed or not available in PATH." >&2
+  exit 1
+fi
 
 if ! command -v git >/dev/null 2>&1; then
   echo "Error: git is not installed or not available in PATH." >&2
@@ -71,6 +76,17 @@ version="$(resolve_manifest_version)" || {
   exit 1
 }
 
+npm ci
+npm run lint
+npm run build
+
+for release_file in manifest.json main.js styles.css; do
+  if [[ ! -f "$release_file" ]]; then
+    echo "Error: release file '$release_file' was not generated." >&2
+    exit 1
+  fi
+done
+
 head_tags="$(git tag --points-at HEAD || true)"
 
 if ! printf '%s\n' "$head_tags" | grep -Fx "$version" >/dev/null 2>&1; then
@@ -83,6 +99,12 @@ if ! printf '%s\n' "$head_tags" | grep -Fx "$version" >/dev/null 2>&1; then
   fi
   exit 1
 fi
+
+cat >&2 <<'EOF'
+Warning: this local release helper cannot create GitHub artifact attestations.
+For Obsidian community submission, prefer pushing the matching tag and letting
+.github/workflows/release.yml build, attest, and publish the release assets.
+EOF
 
 gh release create "$version" \
   manifest.json \

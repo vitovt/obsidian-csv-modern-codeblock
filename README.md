@@ -31,7 +31,7 @@ Markdown tables are tedious when the data is large, frequently edited, copied fr
 - Keeps header rows sticky by default
 - Uses a vertically scrollable table area for tall datasets
 - Adds a toolbar with optional controls for sorting, per-column filtering, compact mode, zebra striping, high-table mode, and single-cell editing
-- Buffers edited cells during `EditMode` and writes them back to the source fenced code block in one save
+- Buffers edited cells during `Edit mode` and writes them back to the source fenced code block in one save
 - Supports per-codeblock options for title, layout, filtering, sorting, links, delimiter selection, and height
 
 ## Performance And Implementation Improvements
@@ -56,7 +56,7 @@ Compared with the earlier plugin idea, this rewrite adds:
 - Compact mode is off until you press `Compact`
 - Zebra striping is off until you press `Zebra`
 - High-table mode is off until you press `High table`
-- Cell editing is off until you press `EditMode`
+- Cell editing is off until you press `Edit mode`
 
 ## Basic Usage
 
@@ -87,11 +87,11 @@ Each rendered table includes a toolbar above it:
 - `Compact` switches to fit-to-width mode
 - `Zebra` toggles alternating row striping
 - `High table` doubles the vertical scroll height
-- `EditMode` enables single-click cell editing
+- `Edit mode` enables single-click cell editing
 
 These controls change only the rendered view. They do not modify your source data.
 
-`EditMode` is the exception: when it is enabled, clicking a table cell opens an inline editor. Leaving the editor or pressing `Ctrl+Enter` / `Cmd+Enter` applies that cell to the rendered table without writing the Markdown file yet. Press `Escape` to cancel the active cell edit. When there are buffered changes, the `EditMode` button shows `*`. Press `EditMode` again to write all buffered changes back to the fenced code block in one save. Sorting and filtering can stay enabled; edited rows are mapped back to their original CSV row before saving.
+`Edit mode` is the exception: when it is enabled, clicking a table cell opens an inline editor. Leaving the editor or pressing `Ctrl+Enter` / `Cmd+Enter` applies that cell to the rendered table without writing the Markdown file yet. Press `Escape` to cancel the active cell edit. When there are buffered changes, the `Edit mode` button shows `*`. Press `Edit mode` again to write all buffered changes back to the fenced code block in one save. Sorting and filtering can stay enabled; edited rows are mapped back to their original CSV row before saving.
 
 ## Codeblock Options
 
@@ -135,6 +135,29 @@ Examples:
 - No access to files outside normal Obsidian plugin execution and rendered note content
 - Fully local behavior inside Obsidian
 - Open source
+
+## Development
+
+The source code lives in `src/main.ts`. The root `main.js` file is generated and is intentionally not tracked in Git.
+
+```bash
+npm ci
+npm run lint
+npm run build
+```
+
+`npm run build` generates the release `main.js` artifact from the TypeScript source.
+
+## Releasing
+
+For Obsidian community submission, create releases from GitHub Actions so release assets get GitHub artifact attestations.
+
+1. Bump `manifest.json`, `versions.json`, and `package.json`.
+2. Commit the source changes.
+3. Tag the commit with the exact manifest version, for example `1.1.1`.
+4. Push the commit and tag.
+
+The `.github/workflows/release.yml` workflow builds `main.js`, attests `main.js`, `manifest.json`, and `styles.css`, then uploads those files to the GitHub release.
 
 ## Inspiration
 
