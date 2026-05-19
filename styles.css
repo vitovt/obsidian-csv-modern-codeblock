@@ -117,6 +117,12 @@
   display: none;
 }
 
+.csv-codeblock__toolbar-marker {
+  display: inline-block;
+  min-width: 1.2em;
+  text-align: center;
+}
+
 .csv-codeblock__toolbar[data-label-mode="narrow"] .csv-codeblock__toolbar-button {
   padding-inline: 0.5rem;
 }
