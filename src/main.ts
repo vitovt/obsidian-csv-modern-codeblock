@@ -903,12 +903,12 @@ function createToolbar(doc, features, onToggle) {
   const buttons = {};
   let animationFrameId = 0;
   const controls = [
-    { key: "sort", label: "Sorting", narrowLabel: "Sort", shortLabel: "S", available: features.sort },
-    { key: "filter", label: "Filtering", narrowLabel: "Filter", shortLabel: "F", available: features.filter },
-    { key: "compact", label: "Compact", narrowLabel: "Fit", shortLabel: "C", available: true },
-    { key: "zebra", label: "Zebra", narrowLabel: "Zebra", shortLabel: "Z", available: true },
-    { key: "highTable", label: "High table", narrowLabel: "Tall", shortLabel: "H", available: true },
-    { key: "edit", label: "Edit mode", narrowLabel: "Edit", shortLabel: "E", available: features.edit }
+    { key: "sort", label: "Sorting", narrowLabel: "Sort", shortLabel: "⇅", available: features.sort },
+    { key: "filter", label: "Filtering", narrowLabel: "Filter", shortLabel: "🔍", available: features.filter },
+    { key: "compact", label: "Compact", narrowLabel: "Fit", shortLabel: "↔", available: true },
+    { key: "zebra", label: "Zebra", narrowLabel: "Zebra", shortLabel: "▤", available: true },
+    { key: "highTable", label: "High table", narrowLabel: "Tall", shortLabel: "↕", available: true },
+    { key: "edit", label: "Edit mode", narrowLabel: "Edit", shortLabel: "✎", available: features.edit }
   ];
 
   toolbar.className = "csv-codeblock__toolbar";
