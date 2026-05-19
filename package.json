@@ -1,6 +1,6 @@
 {
   "name": "obsidian-csv-modern-codeblock",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Render and edit CSV and TSV code blocks as interactive tables in Obsidian.",
   "main": "main.js",
   "scripts": {
