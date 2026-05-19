@@ -1018,16 +1018,31 @@ const DEFAULT_RENDER_OPTIONS = {
 };
 
 function normalizeOptionKey(key) {
-  if (key === "max-height") {
+  const normalizedKey = key.trim().toLowerCase();
+
+  if (normalizedKey === "max-height") {
     return "maxHeight";
   }
-  if (key === "high-table") {
+  if (normalizedKey === "high-table") {
     return "highTable";
   }
-  if (key === "edit-mode") {
+  if (normalizedKey === "edit-mode") {
     return "edit";
   }
-  return key;
+  return normalizedKey;
+}
+
+function findOptionSeparator(token) {
+  const colonIndex = token.indexOf(":");
+  const equalsIndex = token.indexOf("=");
+
+  if (colonIndex <= 0) {
+    return equalsIndex;
+  }
+  if (equalsIndex <= 0) {
+    return colonIndex;
+  }
+  return Math.min(colonIndex, equalsIndex);
 }
 
 function parseBooleanOption(key, rawValue) {
@@ -1104,7 +1119,7 @@ function parseFenceOptions(optionText, defaultDelimiter) {
   const tokens = tokenizeOptionString(optionText);
 
   for (const token of tokens) {
-    const separatorIndex = token.indexOf(":");
+    const separatorIndex = findOptionSeparator(token);
     if (separatorIndex <= 0) {
       throw new Error(`Invalid codeblock option "${String(token)}"`);
     }
@@ -1145,19 +1160,61 @@ function parseFenceOptions(optionText, defaultDelimiter) {
   return options;
 }
 
-function getRenderOptions(ctx, el, defaultDelimiter) {
-  const sectionInfo = getCodeBlockSectionInfo(ctx, el);
-  if (!sectionInfo || typeof sectionInfo.text !== "string") {
-    return Object.assign({}, DEFAULT_RENDER_OPTIONS, { delimiter: defaultDelimiter });
-  }
-
-  const firstLine = sectionInfo.text.split(/\r?\n/, 1)[0];
+function getFenceOptionText(firstLine) {
   const match = /^\s*(?:`{3,}|~{3,})\s*\S+\s*(.*)$/.exec(firstLine);
-  if (!match || match[1].trim().length === 0) {
-    return Object.assign({}, DEFAULT_RENDER_OPTIONS, { delimiter: defaultDelimiter });
+
+  return match ? match[1].trim() : "";
+}
+
+function getLineAt(text, lineNumber) {
+  let lineStart = 0;
+  let currentLine = 0;
+
+  for (let i = 0; i <= text.length; i++) {
+    if (i !== text.length && text[i] !== "\n") {
+      continue;
+    }
+
+    if (currentLine === lineNumber) {
+      const lineEnd = i > lineStart && text[i - 1] === "\r" ? i - 1 : i;
+
+      return text.slice(lineStart, lineEnd);
+    }
+
+    currentLine++;
+    lineStart = i + 1;
   }
 
-  return parseFenceOptions(match[1], defaultDelimiter);
+  return "";
+}
+
+function getDefaultRenderOptions(defaultDelimiter) {
+  return Object.assign({}, DEFAULT_RENDER_OPTIONS, { delimiter: defaultDelimiter });
+}
+
+async function getRenderOptions(plugin, ctx, defaultDelimiter, sectionInfo) {
+  let optionText = "";
+
+  if (sectionInfo && typeof sectionInfo.text === "string") {
+    optionText = getFenceOptionText(sectionInfo.text.split(/\r?\n/, 1)[0]);
+  }
+
+  if (!optionText && sectionInfo && typeof sectionInfo.lineStart === "number") {
+    const sourceFile = getSourceFile(plugin.app, ctx);
+
+    if (sourceFile) {
+      const fileText = await plugin.app.vault.cachedRead(sourceFile);
+      const fenceLine = getLineAt(fileText, sectionInfo.lineStart);
+
+      optionText = getFenceOptionText(fenceLine);
+    }
+  }
+
+  if (!optionText) {
+    return getDefaultRenderOptions(defaultDelimiter);
+  }
+
+  return parseFenceOptions(optionText, defaultDelimiter);
 }
 
 function resolveDelimiter(source, configuredDelimiter) {
@@ -1178,16 +1235,16 @@ export default class CsvCodeBlockPlugin extends Plugin {
   async onload() {
     // Register CSV code block processor
     this.registerMarkdownCodeBlockProcessor("csv", (source, el, ctx) => {
-      this.renderTable(source, el, ctx, "auto");
+      return this.renderTable(source, el, ctx, "auto");
     });
 
     // Register TSV code block processor
     this.registerMarkdownCodeBlockProcessor("tsv", (source, el, ctx) => {
-      this.renderTable(source, el, ctx, "tab");
+      return this.renderTable(source, el, ctx, "tab");
     });
   }
 
-  renderTable(source, el, ctx, defaultDelimiter) {
+  async renderTable(source, el, ctx, defaultDelimiter) {
     const sectionInfo = getCodeBlockSectionInfo(ctx, el);
     const editableSectionInfo = sectionInfo ? Object.assign({}, sectionInfo) : null;
     const sourcePath = ctx && typeof ctx.sourcePath === "string" ? ctx.sourcePath : "";
@@ -1195,9 +1252,17 @@ export default class CsvCodeBlockPlugin extends Plugin {
       sourcePath.length > 0 &&
       typeof editableSectionInfo.lineStart === "number" &&
       typeof editableSectionInfo.lineEnd === "number";
-    const options = getRenderOptions(ctx, el, defaultDelimiter);
-    const resolvedDelimiter = resolveDelimiter(source, options.delimiter);
     const doc = el.ownerDocument;
+    let options;
+
+    try {
+      options = await getRenderOptions(this, ctx, defaultDelimiter, sectionInfo);
+    } catch (error) {
+      this.renderError(el, doc, error);
+      return;
+    }
+
+    const resolvedDelimiter = resolveDelimiter(source, options.delimiter);
     const wrapper = doc.createElement("div");
     const scrollContainer = doc.createElement("div");
     const table = doc.createElement("table");
