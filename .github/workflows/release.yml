@@ -43,6 +43,20 @@ jobs:
             exit 1
           fi
 
+      - name: Verify release notes exist
+        shell: bash
+        run: |
+          notes_file="release-notes/${GITHUB_REF_NAME}.md"
+          if [[ ! -f "$notes_file" ]]; then
+            echo "Missing release notes file: $notes_file" >&2
+            echo "Create and commit $notes_file before pushing tag ${GITHUB_REF_NAME}." >&2
+            exit 1
+          fi
+          if [[ ! -s "$notes_file" ]]; then
+            echo "Release notes file is empty: $notes_file" >&2
+            exit 1
+          fi
+
       - name: Generate artifact attestations
         uses: actions/attest@v4
         with:
@@ -55,10 +69,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          notes_file="release-notes/${GITHUB_REF_NAME}.md"
           gh release create "$GITHUB_REF_NAME" \
             main.js \
             manifest.json \
             styles.css \
             --verify-tag \
-            --generate-notes \
+            --notes-file "$notes_file" \
             --title "$GITHUB_REF_NAME"
