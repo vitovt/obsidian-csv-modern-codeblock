@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { Notice, Plugin, TFile } from "obsidian";
+import { MarkdownRenderChild, Notice, Plugin, TFile } from "obsidian";
 
 class CsvParseError extends Error {
   constructor(message, row, field, line) {
@@ -830,35 +830,113 @@ function updateStickyOffsets(wrapper, headerRow) {
 
 function setToolbarButtonState(button, pressed, dirty = false) {
   const label = button.dataset.label || button.textContent || "";
+  const marker = button.querySelector(".csv-codeblock__toolbar-marker");
+  const dirtyMarker = button.querySelector(".csv-codeblock__toolbar-dirty");
+
   button.className = [
     "csv-codeblock__toolbar-button",
     pressed ? "csv-codeblock__toolbar-button--pressed" : "",
     dirty ? "csv-codeblock__toolbar-button--dirty" : ""
   ].filter((className) => className.length > 0).join(" ");
-  button.textContent = `${pressed ? "✔" : "〰"} ${label}${dirty ? " *" : ""}`;
+  if (marker) {
+    marker.textContent = pressed ? "✔" : "〰";
+  } else {
+    button.textContent = `${pressed ? "✔" : "〰"} ${label}${dirty ? " *" : ""}`;
+  }
+  if (dirtyMarker) {
+    dirtyMarker.textContent = dirty ? "*" : "";
+    dirtyMarker.hidden = !dirty;
+  }
   button.setAttribute("aria-pressed", pressed ? "true" : "false");
   button.setAttribute("aria-label", `${label}: ${pressed ? "enabled" : "disabled"}${dirty ? ", unsaved changes" : ""}`);
+  button.setAttribute("title", label);
+}
+
+function setToolbarLabelMode(toolbar, mode) {
+  toolbar.dataset.labelMode = mode;
+
+  for (const button of toolbar.querySelectorAll(".csv-codeblock__toolbar-button")) {
+    const wideLabel = button.querySelector(".csv-codeblock__toolbar-label--wide");
+    const narrowLabel = button.querySelector(".csv-codeblock__toolbar-label--narrow");
+    const shortLabel = button.querySelector(".csv-codeblock__toolbar-label--short");
+
+    if (wideLabel) {
+      wideLabel.hidden = mode !== "wide";
+    }
+    if (narrowLabel) {
+      narrowLabel.hidden = mode !== "narrow";
+    }
+    if (shortLabel) {
+      shortLabel.hidden = mode !== "short";
+    }
+  }
+}
+
+function toolbarFitsSingleRow(toolbar) {
+  const buttons = Array.from(toolbar.querySelectorAll(".csv-codeblock__toolbar-button"));
+
+  if (buttons.length <= 1 || !toolbar.isConnected) {
+    return true;
+  }
+
+  const firstTop = buttons[0].offsetTop;
+  return buttons.every((button) => Math.abs(button.offsetTop - firstTop) <= 1);
+}
+
+function chooseToolbarLabelMode(toolbar) {
+  if (!toolbar.isConnected) {
+    return toolbar.dataset.labelMode || "wide";
+  }
+
+  for (const mode of ["wide", "narrow", "short"]) {
+    setToolbarLabelMode(toolbar, mode);
+    if (toolbarFitsSingleRow(toolbar)) {
+      return mode;
+    }
+  }
+
+  return "short";
 }
 
 function createToolbar(doc, features, onToggle) {
   const toolbar = doc.createElement("div");
   const buttons = {};
+  let animationFrameId = 0;
   const controls = [
-    { key: "sort", label: "Sorting", available: features.sort },
-    { key: "filter", label: "Filtering", available: features.filter },
-    { key: "compact", label: "Compact", available: true },
-    { key: "zebra", label: "Zebra", available: true },
-    { key: "highTable", label: "High table", available: true },
-    { key: "edit", label: "Edit mode", available: features.edit }
+    { key: "sort", label: "Sorting", narrowLabel: "Sort", shortLabel: "S", available: features.sort },
+    { key: "filter", label: "Filtering", narrowLabel: "Filter", shortLabel: "F", available: features.filter },
+    { key: "compact", label: "Compact", narrowLabel: "Fit", shortLabel: "C", available: true },
+    { key: "zebra", label: "Zebra", narrowLabel: "Zebra", shortLabel: "Z", available: true },
+    { key: "highTable", label: "High table", narrowLabel: "Tall", shortLabel: "H", available: true },
+    { key: "edit", label: "Edit mode", narrowLabel: "Edit", shortLabel: "E", available: features.edit }
   ];
 
   toolbar.className = "csv-codeblock__toolbar";
 
   for (const control of controls) {
     const button = doc.createElement("button");
+    const marker = doc.createElement("span");
+    const wideLabel = doc.createElement("span");
+    const narrowLabel = doc.createElement("span");
+    const shortLabel = doc.createElement("span");
+    const dirtyMarker = doc.createElement("span");
 
     button.type = "button";
     button.dataset.label = control.label;
+    button.dataset.narrowLabel = control.narrowLabel;
+    button.dataset.shortLabel = control.shortLabel;
+    marker.className = "csv-codeblock__toolbar-marker";
+    wideLabel.className = "csv-codeblock__toolbar-label csv-codeblock__toolbar-label--wide";
+    narrowLabel.className = "csv-codeblock__toolbar-label csv-codeblock__toolbar-label--narrow";
+    shortLabel.className = "csv-codeblock__toolbar-label csv-codeblock__toolbar-label--short";
+    dirtyMarker.className = "csv-codeblock__toolbar-dirty";
+    wideLabel.textContent = control.label;
+    narrowLabel.textContent = control.narrowLabel;
+    shortLabel.textContent = control.shortLabel;
+    narrowLabel.hidden = true;
+    shortLabel.hidden = true;
+    dirtyMarker.hidden = true;
+    button.append(marker, wideLabel, narrowLabel, shortLabel, dirtyMarker);
     button.disabled = !control.available;
     setToolbarButtonState(button, false);
     if (button.disabled) {
@@ -874,6 +952,29 @@ function createToolbar(doc, features, onToggle) {
     buttons[control.key] = button;
   }
 
+  const updateLabelMode = () => {
+    animationFrameId = 0;
+    setToolbarLabelMode(toolbar, chooseToolbarLabelMode(toolbar));
+  };
+  const scheduleLabelModeUpdate = () => {
+    if (animationFrameId) {
+      return;
+    }
+    const win = doc.defaultView || window;
+
+    if (win && typeof win.requestAnimationFrame === "function") {
+      animationFrameId = win.requestAnimationFrame(updateLabelMode);
+    } else {
+      updateLabelMode();
+    }
+  };
+  const observer = typeof ResizeObserver === "function" ? new ResizeObserver(scheduleLabelModeUpdate) : null;
+
+  setToolbarLabelMode(toolbar, "wide");
+  if (observer) {
+    observer.observe(toolbar);
+  }
+
   return {
     element: toolbar,
     update(state) {
@@ -882,6 +983,20 @@ function createToolbar(doc, features, onToggle) {
           continue;
         }
         setToolbarButtonState(buttons[control.key], state[control.key], control.key === "edit" && state.editDirty);
+      }
+      scheduleLabelModeUpdate();
+    },
+    destroy() {
+      if (animationFrameId) {
+        const win = doc.defaultView || window;
+
+        if (win && typeof win.cancelAnimationFrame === "function") {
+          win.cancelAnimationFrame(animationFrameId);
+        }
+        animationFrameId = 0;
+      }
+      if (observer) {
+        observer.disconnect();
       }
     }
   };
@@ -1166,6 +1281,12 @@ export default class CsvCodeBlockPlugin extends Plugin {
       state[key] = !state[key];
       applyState();
     });
+    if (ctx && typeof ctx.addChild === "function") {
+      const toolbarCleanup = new MarkdownRenderChild(toolbar.element);
+
+      toolbarCleanup.onunload = () => toolbar.destroy();
+      ctx.addChild(toolbarCleanup);
+    }
     wrapper.appendChild(toolbar.element);
 
     try {
