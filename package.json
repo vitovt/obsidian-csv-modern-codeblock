@@ -19,7 +19,6 @@
   "license": "MIT",
   "devDependencies": {
     "@typescript-eslint/parser": "^8.32.1",
-    "builtin-modules": "^5.0.0",
     "esbuild": "^0.25.4",
     "eslint": "^9.27.0",
     "eslint-plugin-obsidianmd": "^0.3.0",
